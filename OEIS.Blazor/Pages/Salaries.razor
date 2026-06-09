@@ -1,0 +1,171 @@
+@page "/salaries"
+
+@using System.IO
+@using Microsoft.JSInterop
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageHeader Title="My salaries"
+            Subtitle="Review payslips and download PDFs. All amounts in PKR." />
+
+@if (!AuthState.IsAuthenticated)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Please sign in to view salaries.</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden">
+        <MudToolBar Dense="false" Class="px-4 py-3 border-b mud-border-lines-default">
+            <MudText Typo="Typo.subtitle1" Class="font-weight-semibold">Salary history</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadSalaries">Refresh</MudButton>
+        </MudToolBar>
+        <div class="pa-2">
+            @if (_salaries is null)
+            {
+                <MudStack AlignItems="AlignItems.Center" Class="pa-8">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                    <MudText Style="opacity:.65">Loading…</MudText>
+                </MudStack>
+            }
+            else if (_salaries.Count == 0)
+            {
+                <MudText Class="pa-6" Style="opacity:.65"><em>No finalized salaries available yet.</em></MudText>
+            }
+            else
+            {
+                <MudTable T="SalaryVm" Items="@_salaries" Hover="true" Striped="true" Dense="false" Breakpoint="Breakpoint.Md" Elevation="0">
+                    <HeaderContent>
+                        <MudTh>Month</MudTh>
+                        <MudTh>Basic</MudTh>
+                        <MudTh>Overtime</MudTh>
+                        <MudTh>Bonus</MudTh>
+                        <MudTh>Deductions</MudTh>
+                        <MudTh>Net</MudTh>
+                        <MudTh>Generated</MudTh>
+                        <MudTh Style="text-align:right"></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Month">@context.Month</MudTd>
+                        <MudTd DataLabel="Basic">@PakistanCurrency.Format(context.BasicAmount)</MudTd>
+                        <MudTd DataLabel="OT">@PakistanCurrency.Format(context.OvertimeAmount)</MudTd>
+                        <MudTd DataLabel="Bonus">@PakistanCurrency.Format(context.Bonus)</MudTd>
+                        <MudTd DataLabel="Ded">@PakistanCurrency.Format(context.Deductions)</MudTd>
+                        <MudTd DataLabel="Net"><strong>@PakistanCurrency.Format(context.Amount)</strong></MudTd>
+                        <MudTd DataLabel="On">@context.GeneratedOn.ToLocalTime().ToString("g")</MudTd>
+                        <MudTd Style="text-align:right">
+                            <MudButton OnClick="@(() => DownloadPayslipPdfAsync(context))"
+                                       Disabled="@(_downloadingSalaryId == context.SalaryId)"
+                                       Variant="Variant.Outlined"
+                                       Color="Color.Primary"
+                                       Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.PictureAsPdf">
+                                @if (_downloadingSalaryId == context.SalaryId)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-1" />
+                                    <span>...</span>
+                                }
+                                else
+                                {
+                                    <span>PDF</span>
+                                }
+                            </MudButton>
+                        </MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager PageSizeOptions="new[] { 10, 25 }" />
+                    </PagerContent>
+                </MudTable>
+            }
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private List<SalaryVm>? _salaries;
+    private int? _downloadingSalaryId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAuthenticated)
+        {
+            await LoadSalaries();
+        }
+    }
+
+    private async Task LoadSalaries()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _salaries = new();
+            return;
+        }
+
+        var employeeId = AuthState.CurrentUser!.EmployeeId;
+        _salaries = await Http.GetFromJsonAsync<List<SalaryVm>>($"api/salaries/employee/{employeeId}");
+    }
+
+    private async Task DownloadPayslipPdfAsync(SalaryVm row)
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            Snackbar.Add("Please sign in to download payslips.", Severity.Warning);
+            return;
+        }
+
+        _downloadingSalaryId = row.SalaryId;
+        try
+        {
+            using var response = await Http.GetAsync($"api/payslips/{row.SalaryId}");
+            if (!response.IsSuccessStatusCode)
+            {
+                var msg = await response.Content.ReadAsStringAsync();
+                Snackbar.Add(string.IsNullOrWhiteSpace(msg)
+                    ? $"Could not download payslip ({(int)response.StatusCode})."
+                    : msg, Severity.Error);
+                return;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            var safeMonth = SanitizeFileSegment(row.Month);
+            var fileName = $"Payslip_{safeMonth}_{row.EmployeeId}.pdf";
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("oeisDownloadStream", fileName, streamRef);
+            Snackbar.Add("Payslip downloaded.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _downloadingSalaryId = null;
+        }
+    }
+
+    private static string SanitizeFileSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "salary";
+        foreach (var c in Path.GetInvalidFileNameChars())
+            value = value.Replace(c, '_');
+        var trimmed = value.Trim();
+        return string.IsNullOrEmpty(trimmed) ? "salary" : trimmed;
+    }
+
+    public class SalaryVm
+    {
+        public int SalaryId { get; set; }
+        public int EmployeeId { get; set; }
+        public string Month { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public decimal BasicAmount { get; set; }
+        public decimal OvertimeAmount { get; set; }
+        public decimal Bonus { get; set; }
+        public decimal Deductions { get; set; }
+        public DateTime GeneratedOn { get; set; }
+    }
+}

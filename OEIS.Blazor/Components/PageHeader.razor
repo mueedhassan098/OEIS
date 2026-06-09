@@ -1,0 +1,23 @@
+<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Start" Class="mb-4 oeis-page-header-mud flex-wrap gap-3">
+    <MudStack Spacing="1">
+        <MudText Typo="Typo.h4" Class="oeis-title">@Title</MudText>
+        @if (!string.IsNullOrWhiteSpace(Subtitle))
+        {
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary); max-width: 42rem;">
+                @Subtitle
+            </MudText>
+        }
+    </MudStack>
+    @if (ChildContent is not null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-shrink-0" Spacing="1">
+            @ChildContent
+        </MudStack>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

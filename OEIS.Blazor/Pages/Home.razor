@@ -1,0 +1,468 @@
+@page "/"
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>Dashboard</PageTitle>
+
+@if (!AuthState.IsAuthenticated)
+{
+    <PageHeader Title="Welcome" Subtitle="Please sign in to view your dashboard." />
+    <MudPaper Elevation="0" Class="pa-8 rounded-xl oeis-surface text-center">
+        <MudText Typo="Typo.body1" Style="opacity:.8">Use the navigation to sign in and access your workspace.</MudText>
+    </MudPaper>
+}
+else if (string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+{
+    <PageHeader Title="Admin dashboard" Subtitle="High-level overview of your organization today." />
+
+    @if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4" Variant="Variant.Outlined">
+            @_loadError
+        </MudAlert>
+    }
+
+    @if (_isLoading)
+    {
+        <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="py-12">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+            <MudText Typo="Typo.body2" Class="mt-4" Style="opacity:.75">Loading summary…</MudText>
+        </MudStack>
+    }
+    else if (_summary is not null)
+    {
+        <MudGrid Spacing="4" Class="mt-2">
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-stat-card h-100">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.overline" Style="opacity:.65">Employees</MudText>
+                        <MudText Typo="Typo.h3" Class="font-weight-bold">@_summary.TotalEmployees</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-stat-card h-100">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.overline" Style="opacity:.65">Active leaves</MudText>
+                        <MudText Typo="Typo.h3" Class="font-weight-bold">@_summary.ActiveLeaves</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-stat-card oeis-stat-success h-100">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.overline" Style="opacity:.65">Present today</MudText>
+                        <MudText Typo="Typo.h3" Class="font-weight-bold" Color="Color.Success">@_summary.TodayPresent</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-stat-card oeis-stat-danger h-100">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.overline" Style="opacity:.65">Absent today</MudText>
+                        <MudText Typo="Typo.h3" Class="font-weight-bold" Color="Color.Error">@_summary.TodayAbsent</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudGrid Spacing="4" Class="mt-2">
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden h-100">
+                    <MudToolBar Dense="true" Class="px-4 border-b mud-border-lines-default">
+                        <MudText Typo="Typo.subtitle2" Style="opacity:.75">Employees by department</MudText>
+                    </MudToolBar>
+                    <div class="pa-4">
+                        @if (_deptStats is null || _deptStats.Count == 0)
+                        {
+                            <MudText Style="opacity:.6">No data.</MudText>
+                        }
+                        else
+                        {
+                            <MudChart T="double"
+                                      ChartType="ChartType.Pie"
+                                      labels="_deptLabels"
+                                      data="_deptEmployeeData"
+                                      Width="100%"
+                                      Height="280px" />
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden h-100">
+                    <MudToolBar Dense="true" Class="px-4 border-b mud-border-lines-default">
+                        <MudText Typo="Typo.subtitle2" Style="opacity:.75">Salary cost by department (PKR)</MudText>
+                    </MudToolBar>
+                    <div class="pa-4">
+                        @if (_deptStats is null || _deptStats.Count == 0)
+                        {
+                            <MudText Style="opacity:.6">No data.</MudText>
+                        }
+                        else
+                        {
+                            <MudChart T="double"
+                                      ChartType="ChartType.Bar"
+                                      labels="_deptLabels"
+                                      data="_deptSalaryData"
+                                      Width="100%"
+                                      Height="280px" />
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudGrid Spacing="4" Class="mt-2 mb-4">
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4">
+                    <MudText Typo="Typo.subtitle2" Class="mb-3" Style="opacity:.75">Attendance report (CSV)</MudText>
+                    <EditForm Model="_attendanceFilter" OnValidSubmit="UpdateAttendanceUrl">
+                        <MudStack Spacing="3">
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="6">
+                                    <MudDatePicker @bind-Date="_attendanceFilterFrom" Label="From" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudDatePicker @bind-Date="_attendanceFilterTo" Label="To" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" />
+                                </MudItem>
+                            </MudGrid>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" ButtonType="ButtonType.Submit" StartIcon="@Icons.Material.Filled.Link">Update link</MudButton>
+                        </MudStack>
+                    </EditForm>
+                    @if (!string.IsNullOrWhiteSpace(_attendanceExportUrl))
+                    {
+                        <MudButton Href="@_attendanceExportUrl" Target="_blank" Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" StartIcon="@Icons.Material.Filled.Download">
+                            Download attendance CSV
+                        </MudButton>
+                    }
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4">
+                    <MudText Typo="Typo.subtitle2" Class="mb-3" Style="opacity:.75">Salary report (CSV)</MudText>
+                    <EditForm Model="_salaryFilter" OnValidSubmit="UpdateSalaryUrl">
+                        <MudStack Spacing="3">
+                            <MudTextField @bind-Value="_salaryFilter.Month" Label="Month (YYYY-MM)" Variant="Variant.Outlined" />
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" ButtonType="ButtonType.Submit" StartIcon="@Icons.Material.Filled.Link">Update link</MudButton>
+                        </MudStack>
+                    </EditForm>
+                    @if (!string.IsNullOrWhiteSpace(_salaryExportUrl))
+                    {
+                        <MudButton Href="@_salaryExportUrl" Target="_blank" Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" StartIcon="@Icons.Material.Filled.Download">
+                            Download salary CSV
+                        </MudButton>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudGrid Spacing="4" Class="mb-4">
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                    <MudText Typo="Typo.subtitle2" Class="mb-3">Quick actions</MudText>
+                    <MudStack Spacing="2">
+                        <MudButton Href="/employees" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Group">Manage employees</MudButton>
+                        <MudButton Href="/leaves-admin" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CalendarMonth">Review leave requests</MudButton>
+                        <MudButton Href="/payroll" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Payments">Run payroll</MudButton>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                    <MudText Typo="Typo.subtitle2" Class="mb-3">System health</MudText>
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.body2">Attendance coverage</MudText>
+                        <MudProgressLinear Rounded="true" Color="Color.Success" Value="@AttendanceCoverage" />
+                        <MudText Typo="Typo.caption">@AttendanceCoverage.ToString("0")% present today</MudText>
+                        <MudText Typo="Typo.body2" Class="mt-2">Leave pressure</MudText>
+                        <MudProgressLinear Rounded="true" Color="Color.Warning" Value="@LeavePressure" />
+                        <MudText Typo="Typo.caption">@LeavePressure.ToString("0")% on active leave</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudGrid Spacing="4" Class="mb-4">
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" />
+                        <MudText Typo="Typo.subtitle2">Pending leave approvals</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.h4" Class="mt-3 mb-2">@_pendingLeaveCount</MudText>
+                    <MudButton Href="/leaves-admin" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward">Open approvals</MudButton>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.AccessTimeFilled" Color="Color.Info" />
+                        <MudText Typo="Typo.subtitle2">Late arrivals today</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.h4" Class="mt-3 mb-2">@_lateArrivalCount</MudText>
+                    <MudButton Href="/attendance-admin" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward">View attendance board</MudButton>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.CalendarToday" Color="Color.Success" />
+                        <MudText Typo="Typo.subtitle2">Payroll cycle</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.h6" Class="mt-3 mb-2">@DateTime.Today.ToString("MMMM yyyy")</MudText>
+                    <MudChip T="string" Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small">Ready to run</MudChip>
+                    <div class="mt-2">
+                        <MudButton Href="/payroll" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward">Go to payroll</MudButton>
+                    </div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+}
+else
+{
+    <PageHeader Title="My summary" Subtitle="Use the navigation to view your profile, attendance, leaves, and salaries." />
+    <MudGrid Spacing="4" Class="mt-2">
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">Workspace shortcuts</MudText>
+                <MudStack Spacing="2">
+                    <MudButton Href="/attendance" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.EventAvailable">Mark attendance</MudButton>
+                    <MudButton Href="/leaves" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CalendarMonth">Request leave</MudButton>
+                    <MudButton Href="/salaries" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Payments">Check salary & payslip</MudButton>
+                    <MudButton Href="/profile" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Person">Update profile</MudButton>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Class="rounded-xl oeis-surface pa-4 h-100">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">Productivity tips</MudText>
+                <MudList T="string" Dense="true" Class="px-0">
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle">Mark attendance before 9:15 AM</MudListItem>
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle">Submit leaves early for approval</MudListItem>
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle">Keep profile details updated</MudListItem>
+                </MudList>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private DashboardSummaryVm? _summary;
+    private List<DepartmentStatsVm> _deptStats = new();
+    private string[] _deptLabels = Array.Empty<string>();
+    private double[][] _deptEmployeeData = Array.Empty<double[]>();
+    private double[][] _deptSalaryData = Array.Empty<double[]>();
+
+    private DateTime? _attendanceFilterFrom;
+    private DateTime? _attendanceFilterTo;
+
+    private AttendanceReportFilterVm _attendanceFilter = new()
+    {
+        From = DateTime.Today.AddDays(-7),
+        To = DateTime.Today
+    };
+
+    private SalaryReportFilterVm _salaryFilter = new()
+    {
+        Month = DateTime.Today.ToString("yyyy-MM")
+    };
+
+    private string? _attendanceExportUrl;
+    private string? _salaryExportUrl;
+    private string? _loadError;
+    private bool _isLoading;
+    private int _pendingLeaveCount;
+    private int _lateArrivalCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+        _attendanceFilterFrom = _attendanceFilter.From;
+        _attendanceFilterTo = _attendanceFilter.To;
+
+        if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _summary = await Http.GetFromJsonAsync<DashboardSummaryVm>("api/dashboard/summary");
+        }
+        catch
+        {
+            _loadError = "Summary service is temporarily unavailable.";
+            Snackbar.Add(_loadError, Severity.Warning);
+        }
+
+        try
+        {
+            _deptStats = await Http.GetFromJsonAsync<List<DepartmentStatsVm>>("api/dashboard/department-stats") ?? new List<DepartmentStatsVm>();
+        }
+        catch
+        {
+            // Fallback: derive department stats from employees list if direct endpoint fails.
+            try
+            {
+                var employees = await Http.GetFromJsonAsync<List<EmployeeLiteVm>>("api/employees") ?? new List<EmployeeLiteVm>();
+                _deptStats = employees
+                    .GroupBy(e => string.IsNullOrWhiteSpace(e.Department) ? "Unassigned" : e.Department)
+                    .Select(g => new DepartmentStatsVm
+                    {
+                        Department = g.Key,
+                        EmployeeCount = g.Count(),
+                        TotalSalary = g.Sum(x => x.Salary)
+                    })
+                    .OrderBy(x => x.Department)
+                    .ToList();
+            }
+            catch
+            {
+                _deptStats = new List<DepartmentStatsVm>();
+                // Keep UI calm: charts show "No data" without surfacing a blocking warning.
+            }
+        }
+
+        if (_deptStats.Count > 0)
+        {
+            _deptLabels = _deptStats.Select(d => d.Department).ToArray();
+            _deptEmployeeData = new[]
+            {
+                _deptStats.Select(d => (double)d.EmployeeCount).ToArray()
+            };
+            _deptSalaryData = new[]
+            {
+                _deptStats.Select(d => (double)d.TotalSalary).ToArray()
+            };
+        }
+        else
+        {
+            _deptLabels = Array.Empty<string>();
+            _deptEmployeeData = Array.Empty<double[]>();
+            _deptSalaryData = Array.Empty<double[]>();
+        }
+
+        try
+        {
+            var pendingLeaves = await Http.GetFromJsonAsync<List<AdminLeaveRowVm>>("api/leaves/admin?status=Pending") ?? new List<AdminLeaveRowVm>();
+            _pendingLeaveCount = pendingLeaves.Count;
+        }
+        catch
+        {
+            _pendingLeaveCount = 0;
+        }
+
+        try
+        {
+            var dateParam = AppTime.Today.ToString("yyyy-MM-dd");
+            var dailyRows = await Http.GetFromJsonAsync<List<AdminAttendanceRowVm>>($"api/attendance/admin/daily?date={dateParam}") ?? new List<AdminAttendanceRowVm>();
+            var cutoff = new TimeSpan(9, 15, 0);
+            _lateArrivalCount = dailyRows.Count(r => r.EntryTime.HasValue && r.EntryTime.Value.TimeOfDay > cutoff);
+        }
+        catch
+        {
+            _lateArrivalCount = 0;
+        }
+
+        await UpdateAttendanceUrl();
+        await UpdateSalaryUrl();
+        _isLoading = false;
+    }
+
+    private double AttendanceCoverage =>
+        _summary is null || _summary.TotalEmployees <= 0
+            ? 0
+            : Math.Round((_summary.TodayPresent / (double)_summary.TotalEmployees) * 100, 1);
+
+    private double LeavePressure =>
+        _summary is null || _summary.TotalEmployees <= 0
+            ? 0
+            : Math.Round((_summary.ActiveLeaves / (double)_summary.TotalEmployees) * 100, 1);
+
+    private Task UpdateAttendanceUrl()
+    {
+        if (_attendanceFilterFrom.HasValue)
+            _attendanceFilter.From = _attendanceFilterFrom.Value;
+        if (_attendanceFilterTo.HasValue)
+            _attendanceFilter.To = _attendanceFilterTo.Value;
+
+        var from = _attendanceFilter.From.ToString("yyyy-MM-dd");
+        var to = _attendanceFilter.To.ToString("yyyy-MM-dd");
+        _attendanceExportUrl = $"api/reports/attendance?from={from}&to={to}";
+        return Task.CompletedTask;
+    }
+
+    private Task UpdateSalaryUrl()
+    {
+        if (string.IsNullOrWhiteSpace(_salaryFilter.Month))
+        {
+            _salaryExportUrl = null;
+        }
+        else
+        {
+            _salaryExportUrl = $"api/reports/salaries?month={Uri.EscapeDataString(_salaryFilter.Month)}";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public class DashboardSummaryVm
+    {
+        public int TotalEmployees { get; set; }
+        public int ActiveLeaves { get; set; }
+        public int TodayPresent { get; set; }
+        public int TodayAbsent { get; set; }
+    }
+
+    public class DepartmentStatsVm
+    {
+        public string Department { get; set; } = string.Empty;
+        public int EmployeeCount { get; set; }
+        public decimal TotalSalary { get; set; }
+    }
+
+    public class AttendanceReportFilterVm
+    {
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
+    }
+
+    public class SalaryReportFilterVm
+    {
+        public string Month { get; set; } = string.Empty;
+    }
+
+    public class EmployeeLiteVm
+    {
+        public string Department { get; set; } = string.Empty;
+        public decimal Salary { get; set; }
+    }
+
+    public class AdminLeaveRowVm
+    {
+        public int LeaveId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public string LeaveType { get; set; } = string.Empty;
+        public DateOnly FromDate { get; set; }
+        public DateOnly ToDate { get; set; }
+        public string Status { get; set; } = string.Empty;
+    }
+
+    public class AdminAttendanceRowVm
+    {
+        public int EmployeeId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public DateOnly Date { get; set; }
+        public DateTime? EntryTime { get; set; }
+        public DateTime? ExitTime { get; set; }
+    }
+}

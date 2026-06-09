@@ -1,0 +1,289 @@
+@inherits LayoutComponentBase
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject OEIS.Blazor.Services.NotificationCenterService NotificationCenter
+@inject NavigationManager Nav
+@implements IDisposable
+
+<MudThemeProvider Theme="@_theme" @bind-IsDarkMode="@_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout Class="@($"oeis-layout {(_isDarkMode ? "edu-layout-dark" : "edu-layout-light")}")">
+    <MudAppBar Elevation="0" Class="oeis-appbar edu-appbar" Dense="false">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                       Color="Color.Inherit"
+                       Edge="Edge.Start"
+                       OnClick="@ToggleDrawer"
+                       Class="me-1"
+                       aria-label="Menu" />
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="edu-appbar-brand flex-grow-0">
+            <MudAvatar Color="Color.Surface" Class="edu-appbar-logo">
+                <MudIcon Icon="@Icons.Material.Filled.School" Color="Color.Primary" Size="Size.Medium" />
+            </MudAvatar>
+            <div class="d-none d-sm-block">
+                <MudText Typo="Typo.subtitle1" Class="edu-appbar-title mb-n1">OEIS Portal</MudText>
+                <MudText Typo="Typo.caption" Class="edu-appbar-tagline">Education · Attendance · Growth</MudText>
+            </div>
+            <MudText Typo="Typo.subtitle1" Class="d-sm-none edu-appbar-title">OEIS</MudText>
+        </MudStack>
+
+        <MudSpacer />
+
+        @if (AuthState.IsAuthenticated && AuthState.CurrentUser is not null)
+        {
+            <MudChip T="string"
+                     Icon="@Icons.Material.Filled.Person"
+                     Variant="Variant.Filled"
+                     Color="Color.Surface"
+                     Class="edu-user-chip d-none d-md-flex">
+                @AuthState.CurrentUser.FullName · @AuthState.CurrentUser.Role
+            </MudChip>
+        }
+
+        @if (AuthState.IsAuthenticated)
+        {
+            @* MudMenu unreliable in Blazor WASM — use bell + overlay panel (same pattern as entity dialogs). *@
+            <span class="oeis-bell-wrap ms-1">
+                <MudIconButton Icon="@Icons.Material.Filled.Notifications"
+                               Color="Color.Inherit"
+                               OnClick="@OpenNotifyPanelAsync"
+                               aria-label="Notifications"
+                               title="Notifications" />
+                @if (NotificationCenter.UnreadCount > 0)
+                {
+                    <span class="oeis-bell-badge" aria-hidden="true">@(NotificationCenter.UnreadCount > 99 ? "99+" : NotificationCenter.UnreadCount.ToString())</span>
+                }
+            </span>
+        }
+
+        <MudTooltip Text="Light / Dark">
+            <MudIconButton Icon="@Icons.Material.Filled.Brightness6"
+                           Color="Color.Inherit"
+                           Class="ms-1"
+                           OnClick="@ToggleDark" />
+        </MudTooltip>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen"
+               Breakpoint="Breakpoint.Md"
+               Elevation="2"
+               ClipMode="DrawerClipMode.Always"
+               Variant="@DrawerVariant.Responsive"
+               OpenMiniOnHover="false"
+               Class="oeis-drawer edu-drawer"
+               Width="280px"
+               MiniWidth="72px">
+        <div class="edu-drawer-brand pa-4 mb-2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Class="edu-drawer-logo">
+                    <MudIcon Icon="@Icons.Material.Filled.MenuBook" />
+                </MudAvatar>
+                <div>
+                    <MudText Typo="Typo.subtitle2" Class="font-weight-bold">OEIS</MudText>
+                    <MudText Typo="Typo.caption" Style="opacity:.85">Learning workspace</MudText>
+                </div>
+            </MudStack>
+        </div>
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent Class="oeis-main-content edu-main">
+        <div class="edu-bg-shapes" aria-hidden="true"></div>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-4 px-4 px-sm-6 oeis-page-fade edu-content-wrap position-relative">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+
+    @if (AuthState.IsAuthenticated)
+    {
+        <MudOverlay Visible="@_notifyOverlayVisible"
+                    VisibleChanged="@OnNotifyOverlayVisibleChanged"
+                    DarkBackground="true"
+                    ZIndex="2400"
+                    Class="oeis-notification-overlay">
+            <div class="oeis-notification-overlay-inner">
+                <MudPaper Elevation="12"
+                          Class="pa-2 rounded-xl oeis-surface"
+                          Style="width: min(92vw, 380px); max-height: min(70vh, 520px); overflow-y: auto;"
+                          @onclick:stopPropagation="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="px-2 py-1">
+                        <MudText Typo="Typo.subtitle2">Notifications</MudText>
+                        <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
+                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@MarkAllRead">Mark all read</MudButton>
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@(() => CloseNotifyPanel())" aria-label="Close" />
+                        </MudStack>
+                    </MudStack>
+                    <MudDivider Class="my-1" />
+
+                    @if (NotificationCenter.Items.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="px-2 py-3" Style="opacity:.7;">No notifications yet.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var item in NotificationCenter.Items)
+                        {
+                            <MudPaper Elevation="0"
+                                      Class="px-2 py-2 my-1 notification-item"
+                                      Style="border-radius: 10px; cursor: pointer;"
+                                      @onclick="@(() => OpenNotification(item))">
+                                <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="1">
+                                    <MudIcon Icon="@GetTypeIcon(item.Type)"
+                                             Color="@GetTypeColor(item.Type)"
+                                             Size="Size.Small" />
+                                    <MudStack Spacing="0" Class="flex-grow-1">
+                                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                            <MudText Typo="Typo.body2" Class="font-weight-medium">@item.Title</MudText>
+                                            @if (!item.IsRead)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">new</MudChip>
+                                            }
+                                        </MudStack>
+                                        <MudText Typo="Typo.caption" Style="opacity:.8">@item.Message</MudText>
+                                        <MudText Typo="Typo.caption" Style="opacity:.55">@item.CreatedAt.ToString("g")</MudText>
+                                    </MudStack>
+                                </MudStack>
+                            </MudPaper>
+                        }
+                    }
+                </MudPaper>
+            </div>
+        </MudOverlay>
+    }
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = OEIS.Blazor.Theme.OeisTheme.Create();
+    private bool _isDarkMode;
+    private bool _drawerOpen = true;
+    private bool HasUnread => NotificationCenter.UnreadCount > 0;
+    private bool _notifyOverlayVisible;
+
+    private CancellationTokenSource? _notificationPollCts;
+    private EventHandler<LocationChangedEventArgs>? _locationChangedHandler;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleStateChanged;
+        NotificationCenter.OnChange += HandleStateChanged;
+
+        if (AuthState.IsAuthenticated)
+            await NotificationCenter.RefreshAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _locationChangedHandler = (_, _) =>
+            {
+                _ = InvokeAsync(async () =>
+                {
+                    if (AuthState.IsAuthenticated)
+                        await NotificationCenter.RefreshAsync();
+                    StateHasChanged();
+                });
+            };
+            Nav.LocationChanged += _locationChangedHandler;
+
+            _notificationPollCts = new CancellationTokenSource();
+            _ = PollNotificationsLoopAsync(_notificationPollCts.Token);
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task PollNotificationsLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(45));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                if (!AuthState.IsAuthenticated)
+                    continue;
+                await NotificationCenter.RefreshAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void ToggleDark() => _isDarkMode = !_isDarkMode;
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async Task OpenNotifyPanelAsync()
+    {
+        if (!AuthState.IsAuthenticated)
+            return;
+        await NotificationCenter.RefreshAsync();
+        _notifyOverlayVisible = true;
+        StateHasChanged();
+    }
+
+    private void CloseNotifyPanel()
+    {
+        _notifyOverlayVisible = false;
+        StateHasChanged();
+    }
+
+    private void OnNotifyOverlayVisibleChanged(bool visible)
+    {
+        _notifyOverlayVisible = visible;
+        StateHasChanged();
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (AuthState.IsAuthenticated)
+                await NotificationCenter.RefreshAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void MarkAllRead()
+    {
+        NotificationCenter.MarkAllRead();
+    }
+
+    private void OpenNotification(AppNotification item)
+    {
+        NotificationCenter.MarkRead(item.Id);
+        _notifyOverlayVisible = false;
+        if (!string.IsNullOrWhiteSpace(item.Link))
+            Nav.NavigateTo(item.Link);
+    }
+
+    private static string GetTypeIcon(NotificationType type) =>
+        type switch
+        {
+            NotificationType.Success => Icons.Material.Filled.CheckCircle,
+            NotificationType.Warning => Icons.Material.Filled.WarningAmber,
+            _ => Icons.Material.Filled.Info
+        };
+
+    private static Color GetTypeColor(NotificationType type) =>
+        type switch
+        {
+            NotificationType.Success => Color.Success,
+            NotificationType.Warning => Color.Warning,
+            _ => Color.Info
+        };
+
+    public void Dispose()
+    {
+        _notificationPollCts?.Cancel();
+        _notificationPollCts?.Dispose();
+        if (_locationChangedHandler is not null)
+            Nav.LocationChanged -= _locationChangedHandler;
+        AuthState.OnChange -= HandleStateChanged;
+        NotificationCenter.OnChange -= HandleStateChanged;
+    }
+}

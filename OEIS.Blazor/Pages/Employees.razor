@@ -1,0 +1,710 @@
+@page "/employees"
+
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Employees"
+            Subtitle="Manage employee records, roles, and salaries (PKR).">
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.PersonAdd"
+               Class="text-none"
+               OnClick="@(() => { _addOpen = true; })">
+        Add employee
+    </MudButton>
+</PageHeader>
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4" Dense="false" Variant="Variant.Filled" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)">
+        @_errorMessage
+    </MudAlert>
+}
+
+<MudPaper Elevation="0" Class="pa-0 oeis-surface rounded-xl overflow-hidden">
+    <MudToolBar Dense="false" Class="px-4 py-3 gap-3 flex-wrap border-b mud-border-lines-default">
+        <MudText Typo="Typo.subtitle1" Class="font-weight-semibold">Directory</MudText>
+        <MudSpacer />
+        <MudTextField @bind-Value="_searchTerm"
+                      Placeholder="Search name, email, department…"
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      IconSize="Size.Medium"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Immediate="true"
+                      DebounceInterval="200"
+                      Class="oeis-search"
+                      Style="min-width: min(100%, 280px); max-width: 360px;" />
+        <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
+            @(_employees?.Count ?? 0) total
+        </MudChip>
+    </MudToolBar>
+
+    <MudTable T="EmployeeVm"
+              Items="@(_employees ?? new List<EmployeeVm>())"
+              Filter="RowFilter"
+              Hover="true"
+              Striped="true"
+              Dense="false"
+              Loading="@_isLoading"
+              Breakpoint="Breakpoint.Md"
+              Elevation="0"
+              Class="oeis-mud-table">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<EmployeeVm, object>(x => x.EmployeeId)">ID</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<EmployeeVm, object>(x => x.FullName)">Name</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<EmployeeVm, object>(x => x.Email)">Email</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<EmployeeVm, object>(x => x.Department)">Department</MudTableSortLabel></MudTh>
+            <MudTh><MudTableSortLabel SortBy="new Func<EmployeeVm, object>(x => x.Salary)">Salary</MudTableSortLabel></MudTh>
+            <MudTh>Role</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID"><MudText Typo="Typo.body2" Style="opacity:.75">#@context.EmployeeId</MudText></MudTd>
+            <MudTd DataLabel="Name"><MudText Typo="Typo.body1" Class="font-weight-medium">@context.FullName</MudText></MudTd>
+            <MudTd DataLabel="Email"><MudText Typo="Typo.body2" Style="opacity:.8">@context.Email</MudText></MudTd>
+            <MudTd DataLabel="Dept">@context.Department</MudTd>
+            <MudTd DataLabel="Salary">@PakistanCurrency.Format(context.Salary)</MudTd>
+            <MudTd DataLabel="Role">
+                <MudChip T="string" Size="Size.Small" Color="@(context.Role == "Admin" ? Color.Primary : Color.Success)" Variant="Variant.Filled">
+                    @context.Role
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Actions" Style="text-align:right">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Edit"
+                           Class="text-none me-2"
+                           OnClick="@(() => OpenEdit(context))">
+                    Edit
+                </MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.DeleteOutline"
+                           Class="text-none"
+                           OnClick="@(() => OpenDeleteConfirm(context.EmployeeId))">
+                    Delete
+                </MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6" Align="Align.Center" Style="opacity:.7">No employees match your search.</MudText>
+        </NoRecordsContent>
+        <LoadingContent>
+            <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="pa-8">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2">Loading employees…</MudText>
+            </MudStack>
+        </LoadingContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new[] { 10, 25, 50 }" />
+        </PagerContent>
+    </MudTable>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-0 oeis-surface rounded-xl overflow-hidden mt-4">
+    <MudToolBar Dense="false" Class="px-4 py-3 gap-3 flex-wrap border-b mud-border-lines-default">
+        <MudText Typo="Typo.subtitle1" Class="font-weight-semibold">Registration Requests</MudText>
+        <MudSpacer />
+        <MudSelect T="string" Value="_requestStatusFilter" ValueChanged="OnRequestStatusChanged" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px;">
+            <MudSelectItem Value="@("Pending")">Pending</MudSelectItem>
+            <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+            <MudSelectItem Value="@("Rejected")">Rejected</MudSelectItem>
+            <MudSelectItem Value="@("All")">All</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="_requestSearch"
+                      Placeholder="Search requests..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Immediate="true"
+                      DebounceInterval="250"
+                      Style="min-width: min(100%, 240px); max-width: 320px;" />
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadRegistrationRequests">Refresh</MudButton>
+    </MudToolBar>
+
+    <MudTable T="RegistrationRequestVm"
+              Items="@FilteredRequests"
+              Hover="true"
+              Striped="true"
+              Dense="false"
+              Breakpoint="Breakpoint.Md"
+              Elevation="0">
+        <HeaderContent>
+            <MudTh>ID</MudTh>
+            <MudTh>Name</MudTh>
+            <MudTh>Email</MudTh>
+            <MudTh>Department</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Requested On</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID">#@context.EmployeeId</MudTd>
+            <MudTd DataLabel="Name">@context.FullName</MudTd>
+            <MudTd DataLabel="Email">@context.Email</MudTd>
+            <MudTd DataLabel="Department">@context.Department</MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="@RequestStatusColor(context.RegistrationStatus)" Variant="Variant.Filled">
+                    @context.RegistrationStatus
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Requested On">@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
+            <MudTd Style="text-align:right">
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Visibility" OnClick="@(() => ViewRequest(context))">
+                    Details
+                </MudButton>
+                @if (string.Equals(context.RegistrationStatus, "Pending", StringComparison.OrdinalIgnoreCase))
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" Class="mx-1" OnClick="@(() => ApproveRequest(context.EmployeeId))">
+                        Approve
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="@(() => RejectRequest(context.EmployeeId))">
+                        Reject
+                    </MudButton>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Style="opacity:.7">No registration requests.</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new[] { 10, 25 }" />
+        </PagerContent>
+    </MudTable>
+</MudPaper>
+
+<MudOverlay Visible="_addOpen"
+            DarkBackground="true"
+            ZIndex="2000"
+            AutoClose="false"
+            Class="oeis-overlay">
+    <MudPaper Elevation="12"
+              Class="pa-6 ma-4 rounded-xl oeis-dialog-paper oeis-animate-in"
+              Style="max-width: 720px; width: 100%; max-height: 90vh; overflow-y: auto;"
+              @onclick:stopPropagation="true">
+        <MudStack Spacing="3">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.h6">Add employee</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@CloseAdd" aria-label="Close" />
+            </MudStack>
+            <MudText Typo="Typo.body2" Style="opacity:.75">Create a new account with login credentials. All amounts are in PKR.</MudText>
+
+            <EditForm Model="_newEmployee" OnValidSubmit="CreateEmployee">
+                <DataAnnotationsValidator />
+                <MudGrid Spacing="3">
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_newEmployee.FullName"
+                                      Label="Full name"
+                                      Variant="Variant.Outlined"
+                                      For="@(() => _newEmployee.FullName)"
+                                      Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_newEmployee.Email"
+                                      Label="Email"
+                                      Variant="Variant.Outlined"
+                                      InputType="InputType.Email"
+                                      For="@(() => _newEmployee.Email)"
+                                      Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="_newEmployee.Department"
+                                      Label="Department"
+                                      Variant="Variant.Outlined"
+                                      For="@(() => _newEmployee.Department)"
+                                      Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudNumericField @bind-Value="_newEmployee.Salary"
+                                         Label="Salary (PKR)"
+                                         Variant="Variant.Outlined"
+                                         For="@(() => _newEmployee.Salary)"
+                                         Min="0"
+                                         HideSpinButtons="false" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudSelect T="string" @bind-Value="_newEmployee.Role" Label="Role" Variant="Variant.Outlined" AnchorOrigin="Origin.BottomCenter">
+                            <MudSelectItem Value="@("Employee")">Employee</MudSelectItem>
+                            <MudSelectItem Value="@("Admin")">Admin</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_newEmployee.Password"
+                                      Label="Password"
+                                      Variant="Variant.Outlined"
+                                      InputType="InputType.Password"
+                                      For="@(() => _newEmployee.Password)"
+                                      Required="true" />
+                    </MudItem>
+                </MudGrid>
+                <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-4">
+                    <MudButton Variant="Variant.Text" OnClick="@CloseAdd">Cancel</MudButton>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               ButtonType="ButtonType.Submit"
+                               Disabled="@_isSaving"
+                               StartIcon="@Icons.Material.Filled.Save">
+                        @if (_isSaving)
+                        {
+                            <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                        }
+                        else
+                        {
+                            <span>Save employee</span>
+                        }
+                    </MudButton>
+                </MudStack>
+            </EditForm>
+        </MudStack>
+    </MudPaper>
+</MudOverlay>
+
+<MudOverlay Visible="_requestDetailsOpen" DarkBackground="true" ZIndex="2080" AutoClose="false" Class="oeis-overlay">
+    <MudPaper Elevation="12" Class="pa-6 ma-4 rounded-xl oeis-dialog-paper oeis-animate-in"
+              Style="max-width: 680px; width: 100%;"
+              @onclick:stopPropagation="true">
+        <MudStack Spacing="2">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.h6">Registration details</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@(() => _requestDetailsOpen = false)" />
+            </MudStack>
+            @if (_selectedRequest is not null)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="3" Class="mb-2">
+                    <MudAvatar Size="Size.Large" Style="width: 120px; height: 120px;">
+                        @if (!string.IsNullOrWhiteSpace(_selectedRequestProfileImageSrc))
+                        {
+                            <MudImage Src="@_selectedRequestProfileImageSrc" Alt="Employee photo" />
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" />
+                        }
+                    </MudAvatar>
+                    <MudStack Spacing="1" Class="flex-grow-1">
+                        <MudText Typo="Typo.body2"><strong>Name:</strong> @_selectedRequest.FullName</MudText>
+                        <MudText Typo="Typo.body2"><strong>Email:</strong> @_selectedRequest.Email</MudText>
+                        <MudText Typo="Typo.body2"><strong>Department:</strong> @_selectedRequest.Department</MudText>
+                        <MudText Typo="Typo.body2"><strong>Phone:</strong> @(_selectedRequest.Phone ?? "-")</MudText>
+                        <MudText Typo="Typo.body2"><strong>Address:</strong> @(_selectedRequest.Address ?? "-")</MudText>
+                        <MudText Typo="Typo.body2"><strong>Status:</strong> @_selectedRequest.RegistrationStatus</MudText>
+                        <MudText Typo="Typo.body2"><strong>Review note:</strong> @(_selectedRequest.RegistrationReviewNote ?? "-")</MudText>
+                    </MudStack>
+                </MudStack>
+            }
+        </MudStack>
+    </MudPaper>
+</MudOverlay>
+
+<MudOverlay Visible="_editOpen"
+            DarkBackground="true"
+            ZIndex="2050"
+            AutoClose="false"
+            Class="oeis-overlay">
+    <MudPaper Elevation="12"
+              Class="pa-6 ma-4 rounded-xl oeis-dialog-paper oeis-animate-in"
+              Style="max-width: 760px; width: 100%; max-height: 90vh; overflow-y: auto;"
+              @onclick:stopPropagation="true">
+        <MudStack Spacing="3">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.h6">Edit employee</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@CloseEdit" aria-label="Close" />
+            </MudStack>
+            @if (_editing is not null)
+            {
+                @if (!string.IsNullOrWhiteSpace(_editingProfileImageSrc))
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3">
+                        <MudAvatar Size="Size.Medium">
+                            <MudImage Src="@_editingProfileImageSrc" Alt="Employee photo" />
+                        </MudAvatar>
+                        <MudText Typo="Typo.caption" Style="opacity:.75">Registration profile photo</MudText>
+                    </MudStack>
+                }
+                <EditForm Model="_editing" OnValidSubmit="SaveEdit">
+                    <DataAnnotationsValidator />
+                    <MudGrid Spacing="3">
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editing.FullName"
+                                          Label="Full name"
+                                          Variant="Variant.Outlined"
+                                          For="@(() => _editing.FullName)"
+                                          Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editing.Department"
+                                          Label="Department"
+                                          Variant="Variant.Outlined"
+                                          For="@(() => _editing.Department)"
+                                          Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudNumericField @bind-Value="_editing.Salary"
+                                             Label="Salary (PKR)"
+                                             Variant="Variant.Outlined"
+                                             For="@(() => _editing.Salary)"
+                                             Min="0" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudSelect T="string" @bind-Value="_editing.Role" Label="Role" Variant="Variant.Outlined">
+                                <MudSelectItem Value="@("Employee")">Employee</MudSelectItem>
+                                <MudSelectItem Value="@("Admin")">Admin</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudNumericField @bind-Value="_editing.AnnualLeaveQuota"
+                                             Label="Annual leave quota"
+                                             Variant="Variant.Outlined"
+                                             Min="0" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editing.Phone"
+                                          Label="Phone"
+                                          Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editing.Address"
+                                          Label="Address"
+                                          Variant="Variant.Outlined" />
+                        </MudItem>
+                    </MudGrid>
+                    <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-4">
+                        <MudButton Variant="Variant.Text" OnClick="@CloseEdit">Cancel</MudButton>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   ButtonType="ButtonType.Submit"
+                                   Disabled="@_isEditing"
+                                   StartIcon="@Icons.Material.Filled.Save">
+                            @if (_isEditing)
+                            {
+                                <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                            }
+                            else
+                            {
+                                <span>Save changes</span>
+                            }
+                        </MudButton>
+                    </MudStack>
+                </EditForm>
+            }
+        </MudStack>
+    </MudPaper>
+</MudOverlay>
+
+<MudOverlay Visible="_deleteConfirmOpen" DarkBackground="true" ZIndex="2100" Class="oeis-overlay">
+    <MudPaper Elevation="12" Class="pa-6 ma-4 rounded-xl oeis-animate-in" Style="max-width: 400px; width: 100%;" @onclick:stopPropagation="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Remove employee?</MudText>
+        <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.8">This action cannot be undone.</MudText>
+        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2">
+            <MudButton Variant="Variant.Text" OnClick="@(() => _deleteConfirmOpen = false)">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmDelete">Delete</MudButton>
+        </MudStack>
+    </MudPaper>
+</MudOverlay>
+
+@code {
+    private List<EmployeeVm>? _employees;
+    private bool _isLoading;
+    private bool _isSaving;
+    private bool _isEditing;
+    private string _searchTerm = string.Empty;
+    private string? _errorMessage;
+    private bool _addOpen;
+    private bool _editOpen;
+    private bool _deleteConfirmOpen;
+    private bool _requestDetailsOpen;
+    private int _deleteTargetId;
+    private EmployeeEditVm? _editing;
+    private List<RegistrationRequestVm> _registrationRequests = new();
+    private RegistrationRequestVm? _selectedRequest;
+    private string? _selectedRequestProfileImageSrc;
+    private string? _editingProfileImageSrc;
+    private string _requestSearch = string.Empty;
+    private string _requestStatusFilter = "Pending";
+
+    private EmployeeCreateVm _newEmployee = new() { Role = "Employee" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+        await LoadEmployees();
+        await LoadRegistrationRequests();
+        _isLoading = false;
+    }
+
+    private void CloseAdd()
+    {
+        _addOpen = false;
+    }
+
+    private bool RowFilter(EmployeeVm e)
+    {
+        if (string.IsNullOrWhiteSpace(_searchTerm))
+            return true;
+        return (e.FullName?.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+               || (e.Email?.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+               || (e.Department?.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private async Task LoadEmployees()
+    {
+        var all = await Http.GetFromJsonAsync<List<EmployeeVm>>("api/employees")
+                  ?? new List<EmployeeVm>();
+        _employees = all
+            .Where(x => string.IsNullOrWhiteSpace(x.RegistrationStatus) || string.Equals(x.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task LoadRegistrationRequests()
+    {
+        var status = Uri.EscapeDataString(_requestStatusFilter);
+        _registrationRequests = await Http.GetFromJsonAsync<List<RegistrationRequestVm>>($"api/employees/registration-requests?status={status}") ?? new List<RegistrationRequestVm>();
+    }
+
+    private IEnumerable<RegistrationRequestVm> FilteredRequests =>
+        string.IsNullOrWhiteSpace(_requestSearch)
+            ? _registrationRequests
+            : _registrationRequests.Where(r =>
+                r.FullName.Contains(_requestSearch, StringComparison.OrdinalIgnoreCase) ||
+                r.Email.Contains(_requestSearch, StringComparison.OrdinalIgnoreCase) ||
+                r.Department.Contains(_requestSearch, StringComparison.OrdinalIgnoreCase));
+
+    private async Task OnRequestStatusChanged(string value)
+    {
+        _requestStatusFilter = value;
+        await LoadRegistrationRequests();
+    }
+
+    private void ViewRequest(RegistrationRequestVm request)
+    {
+        _selectedRequest = request;
+        _selectedRequestProfileImageSrc = ProfileImageHelper.ToAbsoluteUrl(Http, request.ProfileImageUrl);
+        _requestDetailsOpen = true;
+    }
+
+    private async Task ApproveRequest(int employeeId)
+    {
+        var response = await Http.PutAsJsonAsync($"api/employees/registration-requests/{employeeId}/approve", new { Note = "Approved by admin." });
+        if (response.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Registration approved.", Severity.Success);
+            await LoadRegistrationRequests();
+            await LoadEmployees();
+        }
+        else
+        {
+            Snackbar.Add("Unable to approve request.", Severity.Error);
+        }
+    }
+
+    private async Task RejectRequest(int employeeId)
+    {
+        var response = await Http.PutAsJsonAsync($"api/employees/registration-requests/{employeeId}/reject", new { Note = "Rejected by admin." });
+        if (response.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Registration rejected.", Severity.Info);
+            await LoadRegistrationRequests();
+        }
+        else
+        {
+            Snackbar.Add("Unable to reject request.", Severity.Error);
+        }
+    }
+
+    private static Color RequestStatusColor(string status) =>
+        status switch
+        {
+            "Approved" => Color.Success,
+            "Rejected" => Color.Error,
+            _ => Color.Warning
+        };
+
+    private async Task CreateEmployee()
+    {
+        _errorMessage = null;
+        _isSaving = true;
+
+        var response = await Http.PostAsJsonAsync("api/employees", _newEmployee);
+        if (response.IsSuccessStatusCode)
+        {
+            _newEmployee = new EmployeeCreateVm { Role = "Employee" };
+            await LoadEmployees();
+            _addOpen = false;
+            Snackbar.Add("Employee created successfully.", Severity.Success);
+        }
+        else
+        {
+            _errorMessage = "Unable to save employee. Please check the data and try again.";
+            Snackbar.Add(_errorMessage, Severity.Error);
+        }
+
+        _isSaving = false;
+    }
+
+    private void OpenDeleteConfirm(int id)
+    {
+        _deleteTargetId = id;
+        _deleteConfirmOpen = true;
+    }
+
+    private void OpenEdit(EmployeeVm employee)
+    {
+        _editing = new EmployeeEditVm
+        {
+            EmployeeId = employee.EmployeeId,
+            FullName = employee.FullName,
+            Department = employee.Department,
+            Salary = employee.Salary,
+            Role = employee.Role,
+            EmployeeCode = employee.EmployeeCode,
+            Phone = employee.Phone,
+            Address = employee.Address,
+            ProfileImageUrl = employee.ProfileImageUrl,
+            AnnualLeaveQuota = employee.AnnualLeaveQuota
+        };
+        _editingProfileImageSrc = ProfileImageHelper.ToAbsoluteUrl(Http, employee.ProfileImageUrl);
+        _editOpen = true;
+    }
+
+    private void CloseEdit()
+    {
+        _editOpen = false;
+        _editing = null;
+        _editingProfileImageSrc = null;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (_editing is null) return;
+
+        _isEditing = true;
+        _errorMessage = null;
+
+        var payload = new
+        {
+            _editing.FullName,
+            _editing.Department,
+            _editing.Salary,
+            _editing.Role,
+            _editing.EmployeeCode,
+            _editing.Phone,
+            _editing.Address,
+            _editing.ProfileImageUrl,
+            _editing.AnnualLeaveQuota
+        };
+
+        var response = await Http.PutAsJsonAsync($"api/employees/{_editing.EmployeeId}", payload);
+        if (response.IsSuccessStatusCode)
+        {
+            await LoadEmployees();
+            CloseEdit();
+            Snackbar.Add("Employee updated successfully.", Severity.Success);
+        }
+        else
+        {
+            _errorMessage = "Unable to update employee. Please check data and try again.";
+            Snackbar.Add(_errorMessage, Severity.Error);
+        }
+
+        _isEditing = false;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        _deleteConfirmOpen = false;
+        await DeleteEmployee(_deleteTargetId);
+    }
+
+    private async Task DeleteEmployee(int id)
+    {
+        var response = await Http.DeleteAsync($"api/employees/{id}");
+        if (response.IsSuccessStatusCode)
+        {
+            await LoadEmployees();
+            Snackbar.Add("Employee removed.", Severity.Info);
+        }
+        else
+        {
+            Snackbar.Add("Could not delete employee.", Severity.Error);
+        }
+    }
+
+    public class EmployeeVm
+    {
+        public int EmployeeId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public decimal Salary { get; set; }
+        public string Role { get; set; } = string.Empty;
+        public string? EmployeeCode { get; set; }
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? ProfileImageUrl { get; set; }
+        public int AnnualLeaveQuota { get; set; }
+        public string RegistrationStatus { get; set; } = "Approved";
+    }
+
+    public class EmployeeCreateVm
+    {
+        [Required, StringLength(100)]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required, EmailAddress, StringLength(100)]
+        public string Email { get; set; } = string.Empty;
+
+        [Required, MinLength(6)]
+        public string Password { get; set; } = string.Empty;
+
+        [Required, StringLength(50)]
+        public string Department { get; set; } = string.Empty;
+
+        [Range(0, double.MaxValue)]
+        public decimal Salary { get; set; }
+
+        [Required]
+        public string Role { get; set; } = "Employee";
+    }
+
+    public class EmployeeEditVm
+    {
+        public int EmployeeId { get; set; }
+
+        [Required, StringLength(100)]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required, StringLength(50)]
+        public string Department { get; set; } = string.Empty;
+
+        [Range(0, double.MaxValue)]
+        public decimal Salary { get; set; }
+
+        [Required]
+        public string Role { get; set; } = "Employee";
+
+        public string? EmployeeCode { get; set; }
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? ProfileImageUrl { get; set; }
+        public int AnnualLeaveQuota { get; set; }
+    }
+
+    public class RegistrationRequestVm
+    {
+        public int EmployeeId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? ProfileImageUrl { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public string RegistrationStatus { get; set; } = "Pending";
+        public string? RegistrationReviewNote { get; set; }
+    }
+}

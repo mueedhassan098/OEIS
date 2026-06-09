@@ -1,0 +1,286 @@
+@page "/profile"
+
+@using OEIS.Application.DTOs
+@using OEIS.Blazor.Services
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageHeader Title="My profile"
+            Subtitle="View and update your personal information and profile photo." />
+
+@if (!AuthState.IsAuthenticated)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Please sign in to view your profile.</MudAlert>
+}
+else if (_isLoading)
+{
+    <MudStack AlignItems="AlignItems.Center" Class="py-12">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+        <MudText Class="mt-4" Style="opacity:.75">Loading profile…</MudText>
+    </MudStack>
+}
+else if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="rounded-lg">@_error</MudAlert>
+}
+else if (_model is not null)
+{
+    <MudPaper Elevation="0" Class="pa-6 rounded-xl oeis-surface" Style="max-width: 720px;">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+            <MudText Typo="Typo.h6">Personal details</MudText>
+            <MudChip T="string" Variant="Variant.Outlined" Size="Size.Small">Profile</MudChip>
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mb-4 flex-wrap">
+            <MudAvatar Size="Size.Large" Style="width: 96px; height: 96px;">
+                @if (!string.IsNullOrWhiteSpace(_previewUrl))
+                {
+                    <MudImage Src="@_previewUrl" Alt="Profile photo" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" />
+                }
+            </MudAvatar>
+            <MudStack Spacing="1">
+                <InputFile id="profile-photo-upload"
+                           OnChange="OnProfileImageSelected"
+                           accept="image/jpeg,image/png,image/webp"
+                           class="d-none" />
+                <MudButton HtmlTag="label"
+                           Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Upload"
+                           for="profile-photo-upload">
+                    Upload profile picture
+                </MudButton>
+                <MudText Typo="Typo.caption" Style="opacity:.7">JPG, PNG or WebP · max 2 MB</MudText>
+                @if (!string.IsNullOrWhiteSpace(_previewUrl))
+                {
+                    <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProfileImage">Remove photo</MudButton>
+                }
+            </MudStack>
+        </MudStack>
+
+        <EditForm Model="_model" OnValidSubmit="SaveProfile">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="3">
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_model.FullName"
+                                  Label="Full name"
+                                  Variant="Variant.Outlined"
+                                  For="@(() => _model.FullName)"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Person" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_model.Department"
+                                  Label="Department"
+                                  Variant="Variant.Outlined"
+                                  For="@(() => _model.Department)"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Apartment" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_model.Phone"
+                                  Label="Phone"
+                                  Variant="Variant.Outlined"
+                                  For="@(() => _model.Phone)"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Phone" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_model.Address"
+                                  Label="Address"
+                                  Variant="Variant.Outlined"
+                                  For="@(() => _model.Address)"
+                                  Lines="2"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Place" />
+                </MudItem>
+            </MudGrid>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Class="mt-4"
+                       ButtonType="ButtonType.Submit"
+                       Disabled="@_isSaving"
+                       StartIcon="@Icons.Material.Filled.Save">
+                @if (_isSaving)
+                {
+                    <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                }
+                Save changes
+            </MudButton>
+        </EditForm>
+    </MudPaper>
+}
+
+@code {
+    private ProfileVm? _model;
+    private bool _isLoading;
+    private bool _isSaving;
+    private string? _error;
+    private string? _profileImageBase64;
+    private string? _previewUrl;
+    private bool _removeProfileImage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        var id = AuthState.CurrentUser!.EmployeeId;
+        try
+        {
+            var data = await Http.GetFromJsonAsync<EmployeeDto>($"api/employees/{id}", HttpJson.Options);
+            if (data is not null)
+            {
+                _model = new ProfileVm
+                {
+                    FullName = data.FullName,
+                    Department = data.Department,
+                    Phone = data.Phone,
+                    Address = data.Address
+                };
+                _previewUrl = ProfileImageHelper.ToAbsoluteUrl(Http, data.ProfileImageUrl);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = "Unable to load profile.";
+            Console.WriteLine(ex);
+        }
+
+        _isLoading = false;
+    }
+
+    private async Task OnProfileImageSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.Size > 2 * 1024 * 1024)
+        {
+            Snackbar.Add("Profile picture must be 2 MB or smaller.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            _profileImageBase64 = Convert.ToBase64String(bytes);
+            _previewUrl = $"data:{file.ContentType};base64,{_profileImageBase64}";
+            _removeProfileImage = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not read image: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void ClearProfileImage()
+    {
+        _profileImageBase64 = null;
+        _previewUrl = null;
+        _removeProfileImage = true;
+    }
+
+    private async Task SaveProfile()
+    {
+        if (!AuthState.IsAuthenticated || _model is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _error = null;
+        var id = AuthState.CurrentUser!.EmployeeId;
+
+        var dto = new EmployeeSelfProfileUpdateDto(
+            _model.FullName.Trim(),
+            _model.Department.Trim())
+        {
+            Phone = _model.Phone,
+            Address = _model.Address,
+            ProfileImageBase64 = string.IsNullOrWhiteSpace(_profileImageBase64)
+                ? null
+                : $"data:image/jpeg;base64,{_profileImageBase64}",
+            RemoveProfileImage = _removeProfileImage && string.IsNullOrWhiteSpace(_profileImageBase64)
+        };
+
+        try
+        {
+            var resp = await Http.PutAsJsonAsync($"api/employees/{id}/profile", dto, HttpJson.Options);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = await resp.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(_error))
+                {
+                    _error = "Unable to save profile. Please try again.";
+                }
+                Snackbar.Add(_error, Severity.Error);
+            }
+            else
+            {
+                var saved = await resp.Content.ReadFromJsonAsync<EmployeeDto>(HttpJson.Options);
+                if (saved is not null)
+                {
+                    _previewUrl = ProfileImageHelper.ToAbsoluteUrl(Http, saved.ProfileImageUrl);
+                    AuthState.SetUser(new UserInfo
+                    {
+                        EmployeeId = AuthState.CurrentUser.EmployeeId,
+                        FullName = saved.FullName,
+                        Email = AuthState.CurrentUser.Email,
+                        Role = AuthState.CurrentUser.Role,
+                        ProfileImageUrl = saved.ProfileImageUrl
+                    }, AuthState.JwtToken);
+                }
+
+                _profileImageBase64 = null;
+                _removeProfileImage = false;
+                Snackbar.Add("Profile saved.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not reach the server. ({ex.Message})";
+            Snackbar.Add(_error, Severity.Error);
+        }
+
+        _isSaving = false;
+    }
+
+    public class ProfileVm
+    {
+        [Required, StringLength(100)]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required, StringLength(50)]
+        public string Department { get; set; } = string.Empty;
+
+        [StringLength(30)]
+        public string? Phone { get; set; }
+
+        [StringLength(200)]
+        public string? Address { get; set; }
+    }
+
+    public class EmployeeDto
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? ProfileImageUrl { get; set; }
+    }
+}

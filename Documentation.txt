@@ -1,0 +1,282 @@
+# Online Employee Information System (OEIS)
+
+## 1. Project Overview
+
+### 1.1 Project Title
+
+Online Employee Information System
+
+### 1.2 Domain / Category
+
+Web Application
+
+### 1.3 Technology Stack
+
+* **Frontend:** Angular (Latest LTS)
+* **Backend:** ASP.NET Core Web API (.NET 8 / .NET 7)
+* **Architecture:** Clean Architecture
+* **Database:** Microsoft SQL Server
+* **ORM:** Entity Framework Core
+* **Authentication:** JWT (JSON Web Tokens)
+* **Hosting (Optional):** IIS / Azure / Docker
+
+---
+
+## 2. Abstract / Introduction
+
+The **Online Employee Information System (OEIS)** is a web-based application designed to manage employee records, attendance, leave management, and salary processing in an efficient and secure manner. The system provides separate portals for **Admin** and **Employee**, enabling role-based access to features.
+
+The admin manages employees, salaries, attendance, and leave approvals, while employees can manage their profiles, mark attendance, apply for leave, and view salary slips. The system follows **Clean Architecture principles** to ensure scalability, maintainability, and separation of concerns.
+
+---
+
+## 3. System Users & Roles
+
+### 3.1 Admin
+
+* Full control over employee data
+* Salary and leave management
+* Attendance monitoring
+
+### 3.2 Employee
+
+* Limited access to personal data
+* Attendance marking
+* Leave application and salary viewing
+
+---
+
+## 4. Functional Requirements
+
+### 4.1 Admin Panel Features
+
+1. Admin authentication (Login / Logout)
+2. Create, update, view, and delete employee records
+3. Assign departments and salary structures
+4. Generate monthly salary slips
+5. View employee attendance reports
+6. Define leave quotas based on employee pay scale
+7. Approve or reject employee leave requests
+8. Manage system users and roles
+
+### 4.2 Employee Panel Features
+
+1. Employee authentication
+2. Update personal profile information
+3. Mark attendance (Entry & Exit time)
+4. View monthly attendance history
+5. Apply for leave
+6. View leave balance and history
+7. View monthly salary slips
+
+---
+
+## 5. Non-Functional Requirements
+
+* Secure authentication using JWT
+* Role-based authorization
+* Responsive UI (Angular Material / Bootstrap)
+* Data validation on frontend and backend
+* High availability and performance
+* Scalable and maintainable codebase
+
+---
+
+## 6. System Architecture (Clean Architecture)
+
+### 6.1 Layered Structure
+
+```
+OEIS
+│
+├── Domain Layer
+│   ├── Entities
+│   ├── Enums
+│   └── Interfaces
+│
+├── Application Layer
+│   ├── DTOs
+│   ├── Interfaces
+│   ├── Services
+│   └── Validators
+│
+├── Infrastructure Layer
+│   ├── Data
+│   ├── Repositories
+│   ├── Identity
+│   └── Migrations
+│
+└── Presentation Layer (API)
+    ├── Controllers
+    ├── Filters
+    └── Middleware
+```
+
+---
+
+## 7. Database Design
+
+### 7.1 Tables
+
+#### 7.1.1 Employees
+
+| Column       | Type          | Description        |
+| ------------ | ------------- | ------------------ |
+| EmployeeId   | INT (PK)      | Unique employee ID |
+| FullName     | NVARCHAR(100) | Employee name      |
+| Email        | NVARCHAR(100) | Unique email       |
+| PasswordHash | NVARCHAR(MAX) | Encrypted password |
+| Department   | NVARCHAR(50)  | Department name    |
+| Salary       | DECIMAL       | Monthly salary     |
+| Role         | NVARCHAR(20)  | Admin / Employee   |
+| CreatedAt    | DATETIME      | Record creation    |
+
+#### 7.1.2 Attendance
+
+| Column       | Type     | Description        |
+| ------------ | -------- | ------------------ |
+| AttendanceId | INT (PK) | Attendance ID      |
+| EmployeeId   | INT (FK) | Employee reference |
+| EntryTime    | DATETIME | Login time         |
+| ExitTime     | DATETIME | Logout time        |
+| Date         | DATE     | Attendance date    |
+
+#### 7.1.3 Leaves
+
+| Column     | Type         | Description                   |
+| ---------- | ------------ | ----------------------------- |
+| LeaveId    | INT (PK)     | Leave ID                      |
+| EmployeeId | INT (FK)     | Employee reference            |
+| LeaveType  | NVARCHAR(50) | Casual / Sick                 |
+| FromDate   | DATE         | Start date                    |
+| ToDate     | DATE         | End date                      |
+| Status     | NVARCHAR(20) | Pending / Approved / Rejected |
+
+#### 7.1.4 Salaries
+
+| Column      | Type         | Description            |
+| ----------- | ------------ | ---------------------- |
+| SalaryId    | INT (PK)     | Salary record ID       |
+| EmployeeId  | INT (FK)     | Employee reference     |
+| Month       | NVARCHAR(20) | Salary month           |
+| Amount      | DECIMAL      | Net salary             |
+| GeneratedOn | DATETIME     | Salary generation date |
+
+---
+
+## 8. CRUD Operations
+
+### 8.1 Employee CRUD
+
+* **Create:** Admin adds employee
+* **Read:** Admin/Employee views data
+* **Update:** Admin or Employee (limited)
+* **Delete:** Admin removes employee
+
+### 8.2 Attendance CRUD
+
+* **Create:** Employee marks attendance
+* **Read:** Admin & Employee view records
+* **Update:** Exit time auto-updated
+* **Delete:** Restricted (Admin only)
+
+### 8.3 Leave CRUD
+
+* **Create:** Employee applies leave
+* **Read:** Admin & Employee view leaves
+* **Update:** Admin approves/rejects
+* **Delete:** Admin cancels leave
+
+---
+
+## 9. Validation Rules
+
+### 9.1 Frontend (Angular)
+
+* Required field validation (Reactive Forms)
+* Email format validation
+* Password strength validation
+* Date range validation for leave
+
+### 9.2 Backend (.NET Core)
+
+* FluentValidation for DTOs
+* Unique email constraint
+* Salary > 0
+* Leave dates must be valid
+* Attendance cannot have duplicate entry per day
+
+---
+
+## 10. API Endpoints (Sample)
+
+### Auth Controller
+
+* POST /api/auth/login
+* POST /api/auth/register
+
+### Employee Controller
+
+* GET /api/employees
+* GET /api/employees/{id}
+* POST /api/employees
+* PUT /api/employees/{id}
+* DELETE /api/employees/{id}
+
+### Attendance Controller
+
+* POST /api/attendance/check-in
+* POST /api/attendance/check-out
+* GET /api/attendance/monthly
+
+### Leave Controller
+
+* POST /api/leaves
+* PUT /api/leaves/{id}/approve
+* PUT /api/leaves/{id}/reject
+
+---
+
+## 11. Security
+
+* JWT Authentication
+* Role-based authorization (Admin / Employee)
+* Password hashing (BCrypt)
+* HTTPS enforced
+
+---
+
+## 12. Frontend (Angular) Modules
+
+* Auth Module
+* Admin Module
+* Employee Module
+* Shared Module
+
+---
+
+## 13. Testing
+
+* Unit Testing (xUnit)
+* API Testing (Postman)
+* Frontend Testing (Jasmine / Karma)
+
+---
+
+## 14. Future Enhancements
+
+* Email & SMS notifications
+* Payroll tax calculation
+* Performance appraisal module
+* Biometric attendance integration
+
+---
+
+## 15. Conclusion
+
+The Online Employee Information System provides a complete solution for employee management with a modern Angular frontend, robust ASP.NET Core backend, and scalable Clean Architecture. The system ensures data integrity, security, and ease of use for both administrators and employees.
+
+---
+
+**Supervisor:** Akmal Khan
+**Project Type:** Academic / Enterprise Web Application

@@ -1,0 +1,85 @@
+@inject OEIS.Blazor.Services.AuthState AuthState
+@implements IDisposable
+
+<MudNavMenu Dense="true" Class="edu-sidebar-nav px-2 pb-4">
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home" Class="edu-nav-link">
+        Home
+    </MudNavLink>
+
+    @if (AuthState.IsAuthenticated && string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+    {
+        <MudDivider Class="my-3 mx-2 opacity-50" />
+        <MudText Typo="Typo.overline" Class="px-3 mb-2 edu-nav-section">Admin</MudText>
+
+        <MudNavLink Href="employees" Icon="@Icons.Material.Filled.Group" Class="edu-nav-link">
+            Employees
+        </MudNavLink>
+        <MudNavLink Href="attendance-admin" Icon="@Icons.Material.Filled.EventAvailable" Class="edu-nav-link">
+            Attendance board
+        </MudNavLink>
+        <MudNavLink Href="leaves-admin" Icon="@Icons.Material.Filled.CalendarMonth" Class="edu-nav-link">
+            Leave approvals
+        </MudNavLink>
+        <MudNavLink Href="payroll" Icon="@Icons.Material.Filled.Payments" Class="edu-nav-link">
+            Payroll
+        </MudNavLink>
+    }
+    else if (AuthState.IsAuthenticated)
+    {
+        <MudDivider Class="my-3 mx-2 opacity-50" />
+        <MudText Typo="Typo.overline" Class="px-3 mb-2 edu-nav-section">My workspace</MudText>
+
+        <MudNavLink Href="profile" Icon="@Icons.Material.Filled.Person" Class="edu-nav-link">
+            Profile
+        </MudNavLink>
+        <MudNavLink Href="attendance" Icon="@Icons.Material.Filled.EventAvailable" Class="edu-nav-link">
+            Attendance
+        </MudNavLink>
+        <MudNavLink Href="leaves" Icon="@Icons.Material.Filled.CalendarMonth" Class="edu-nav-link">
+            Leaves
+        </MudNavLink>
+        <MudNavLink Href="salaries" Icon="@Icons.Material.Filled.Payments" Class="edu-nav-link">
+            Salaries
+        </MudNavLink>
+    }
+
+    <MudDivider Class="my-3 mx-2 opacity-50" />
+
+    @if (!AuthState.IsAuthenticated)
+    {
+        <MudNavLink Href="login" Icon="@Icons.Material.Filled.Login" Class="edu-nav-link edu-nav-accent">
+            Login
+        </MudNavLink>
+        <MudNavLink Href="register" Icon="@Icons.Material.Filled.PersonAddAlt1" Class="edu-nav-link">
+            Apply Job
+        </MudNavLink>
+    }
+    else
+    {
+        <MudNavLink Href="login" Icon="@Icons.Material.Filled.Logout" OnClick="Logout" Class="edu-nav-link">
+            Logout
+        </MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    protected override void OnInitialized()
+    {
+        AuthState.OnChange += HandleAuthChanged;
+    }
+
+    private void HandleAuthChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Logout()
+    {
+        AuthState.SetUser(null);
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChanged;
+    }
+}

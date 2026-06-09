@@ -1,0 +1,289 @@
+@page "/attendance-admin"
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Attendance dashboard"
+            Subtitle="Saari employees ki attendance — jitni purani chahen date range se load karein; table par search se filter karein." />
+
+@if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Only admins can view this page.</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-surface mb-4">
+        <MudText Typo="Typo.subtitle1" Class="font-weight-semibold mb-3">Filters</MudText>
+        <MudStack Spacing="3">
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End" Class="flex-wrap">
+                <MudDatePicker @bind-Date="_fromDate" Label="From date" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" Style="min-width: 180px;" />
+                <MudDatePicker @bind-Date="_toDate" Label="To date" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" Style="min-width: 180px;" />
+                <MudTextField @bind-Value="_department"
+                              Label="Department (optional)"
+                              Variant="Variant.Outlined"
+                              Style="min-width: 200px;" />
+                <MudTextField @bind-Value="_apiSearch"
+                              Label="Contains (optional)"
+                              Variant="Variant.Outlined"
+                              Style="min-width: 220px;"
+                              HelperText="Load par name / email / dept filter" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadHistory" Disabled="_loading" StartIcon="@Icons.Material.Filled.Search">
+                    @if (_loading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                        <span>Loading…</span>
+                    }
+                    else
+                    {
+                        <span>Load attendance</span>
+                    }
+                </MudButton>
+            </MudStack>
+            <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SetTodayOnly">Aaj ki din</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SetLast30Days">Pichle 30 din</MudButton>
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SetAllTime">Poori history (max limit)</MudButton>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+            @_errorMessage
+        </MudAlert>
+    }
+
+    @if (_loadedTruncated)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Zyada records ki wajah se sirf pehle @_maxRowsHint rows dikhai gayi hain — date range ya search se narrow karein.
+        </MudAlert>
+    }
+
+    @if (_rows is null)
+    {
+        <MudText Style="opacity:.65"><em>Filters set kar ke Load attendance dabayein.</em></MudText>
+    }
+    else if (_rows.Count == 0)
+    {
+        <MudText Style="opacity:.65"><em>Is range / filter par koi record nahi mila.</em></MudText>
+    }
+    else
+    {
+        <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden">
+            <MudTable T="AdminAttendanceRowVm"
+                      Items="@_rows"
+                      Hover="true"
+                      Striped="true"
+                      Dense="false"
+                      Breakpoint="Breakpoint.Md"
+                      Filter="RowFilter"
+                      Elevation="0">
+                <ToolBarContent>
+                    <MudText Typo="Typo.body2" Class="me-2"><strong>@_rows.Count</strong> rows</MudText>
+                    <MudSpacer />
+                    <MudTextField @bind-Value="_search"
+                                  Placeholder="Table search: naam, dept, date, employee id…"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Immediate="true"
+                                  DebounceInterval="200"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Class="flex-grow-1"
+                                  Style="max-width: min(100%, 360px);" />
+                </ToolBarContent>
+                <HeaderContent>
+                    <MudTh>Employee</MudTh>
+                    <MudTh>Department</MudTh>
+                    <MudTh>Date</MudTh>
+                    <MudTh>Entry</MudTh>
+                    <MudTh>Exit</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Hours</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    @{
+                        var status = GetStatus(context);
+                        var hours = GetHours(context);
+                    }
+                    <MudTd DataLabel="Employee">@context.FullName</MudTd>
+                    <MudTd DataLabel="Dept">@context.Department</MudTd>
+                    <MudTd DataLabel="Date">@context.Date.ToShortDateString()</MudTd>
+                    <MudTd DataLabel="In">@(context.EntryTime?.ToString("HH:mm") ?? "—")</MudTd>
+                    <MudTd DataLabel="Out">@(context.ExitTime?.ToString("HH:mm") ?? "—")</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(status)" Variant="Variant.Filled">@status</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Hrs">@(hours?.ToString("0.0") ?? "—")</MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager PageSizeOptions="new[] { 15, 30, 50, 100 }" />
+                </PagerContent>
+            </MudTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private DateTime? _fromDate = new DateTime(2000, 1, 1);
+    private DateTime? _toDate = AppTime.Now.Date;
+    private string _department = string.Empty;
+    private string _apiSearch = string.Empty;
+    private string _search = string.Empty;
+
+    private List<AdminAttendanceRowVm>? _rows;
+    private string? _errorMessage;
+    private bool _loading;
+    private bool _loadedTruncated;
+    private const int ApiMaxRows = 25000;
+    private string _maxRowsHint => ApiMaxRows.ToString("N0");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAuthenticated &&
+            string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            await LoadHistory();
+        }
+    }
+
+    private bool RowFilter(AdminAttendanceRowVm r)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+            return true;
+
+        var q = _search.Trim();
+        if (r.FullName.Contains(q, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (r.Department.Contains(q, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (r.Date.ToString("yyyy-MM-dd").Contains(q, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (r.Date.ToShortDateString().Contains(q, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (r.EmployeeId.ToString().Contains(q, StringComparison.Ordinal))
+            return true;
+
+        return false;
+    }
+
+    private Color StatusColor(string status) =>
+        status switch
+        {
+            "Absent" => Color.Error,
+            "Late" => Color.Warning,
+            _ => Color.Success
+        };
+
+    private void SetTodayOnly()
+    {
+        var t = AppTime.Now.Date;
+        _fromDate = t;
+        _toDate = t;
+    }
+
+    private void SetLast30Days()
+    {
+        _toDate = AppTime.Now.Date;
+        _fromDate = AppTime.Now.Date.AddDays(-30);
+    }
+
+    private void SetAllTime()
+    {
+        _fromDate = new DateTime(2000, 1, 1);
+        _toDate = AppTime.Now.Date;
+    }
+
+    private async Task LoadHistory()
+    {
+        _errorMessage = null;
+        _loadedTruncated = false;
+
+        if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!_fromDate.HasValue || !_toDate.HasValue)
+        {
+            _errorMessage = "From aur To dono dates zaroori hain.";
+            Snackbar.Add(_errorMessage, Severity.Warning);
+            return;
+        }
+
+        var from = DateOnly.FromDateTime(_fromDate.Value.Date);
+        var to = DateOnly.FromDateTime(_toDate.Value.Date);
+        if (from > to)
+        {
+            _errorMessage = "From date, To date se pehle ya barabar honi chahiye.";
+            Snackbar.Add(_errorMessage, Severity.Warning);
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            var qs = new List<string>
+            {
+                $"fromDate={Uri.EscapeDataString(from.ToString("yyyy-MM-dd"))}",
+                $"toDate={Uri.EscapeDataString(to.ToString("yyyy-MM-dd"))}",
+                $"maxRows={ApiMaxRows}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(_department))
+                qs.Add($"department={Uri.EscapeDataString(_department.Trim())}");
+            if (!string.IsNullOrWhiteSpace(_apiSearch))
+                qs.Add($"search={Uri.EscapeDataString(_apiSearch.Trim())}");
+
+            var url = $"api/attendance/admin/history?{string.Join("&", qs)}";
+            var result = await Http.GetFromJsonAsync<List<AdminAttendanceRowVm>>(url) ?? new List<AdminAttendanceRowVm>();
+
+            _loadedTruncated = result.Count >= ApiMaxRows;
+            _rows = result;
+        }
+        catch (Exception)
+        {
+            _rows = new List<AdminAttendanceRowVm>();
+            _errorMessage = "Attendance load nahi ho saki. API / login check karein.";
+            Snackbar.Add(_errorMessage, Severity.Warning);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string GetStatus(AdminAttendanceRowVm row)
+    {
+        if (row.EntryTime is null)
+        {
+            return "Absent";
+        }
+
+        var cutoff = new TimeSpan(9, 15, 0);
+        return row.EntryTime.Value.TimeOfDay > cutoff ? "Late" : "On time";
+    }
+
+    private static double? GetHours(AdminAttendanceRowVm row)
+    {
+        if (row.EntryTime is null || row.ExitTime is null)
+        {
+            return null;
+        }
+
+        var span = row.ExitTime.Value - row.EntryTime.Value;
+        if (span.TotalMinutes <= 0) return null;
+        return span.TotalHours;
+    }
+
+    public class AdminAttendanceRowVm
+    {
+        public int EmployeeId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public DateOnly Date { get; set; }
+        public DateTime? EntryTime { get; set; }
+        public DateTime? ExitTime { get; set; }
+    }
+}

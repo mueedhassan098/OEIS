@@ -1,0 +1,226 @@
+@page "/leaves-admin"
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Leave approvals"
+            Subtitle="Review and action pending leave requests." />
+
+@if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Only admins can view this page.</MudAlert>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)">@_errorMessage</MudAlert>
+    }
+
+    <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-surface mb-4">
+        <MudText Typo="Typo.subtitle1" Class="font-weight-semibold mb-3">Filters</MudText>
+        <EditForm Model="_filter" OnValidSubmit="LoadLeaves">
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End" Class="flex-wrap">
+                <MudSelect T="string" @bind-Value="_filter.Status" Label="Status" Variant="Variant.Outlined" Style="min-width: 160px;">
+                    <MudSelectItem Value="@("Pending")">Pending</MudSelectItem>
+                    <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+                    <MudSelectItem Value="@("Rejected")">Rejected</MudSelectItem>
+                    <MudSelectItem Value="@("All")">All</MudSelectItem>
+                </MudSelect>
+                <MudTextField @bind-Value="_filter.Department"
+                              Label="Department (optional)"
+                              Variant="Variant.Outlined"
+                              Style="min-width: 220px;" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" ButtonType="ButtonType.Submit" StartIcon="@Icons.Material.Filled.FilterList">
+                    Load
+                </MudButton>
+            </MudStack>
+        </EditForm>
+    </MudPaper>
+
+    @if (_rows is null)
+    {
+        <MudText Style="opacity:.65"><em>Loading…</em></MudText>
+    }
+    else if (_rows.Count == 0)
+    {
+        <MudText Style="opacity:.65"><em>No leaves for the selected criteria.</em></MudText>
+    }
+    else
+    {
+        <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden">
+            <MudTable T="AdminLeaveRowVm"
+                      Items="@_rows"
+                      Hover="true"
+                      Striped="true"
+                      Dense="false"
+                      Breakpoint="Breakpoint.Md"
+                      Filter="RowFilter"
+                      Elevation="0">
+                <ToolBarContent>
+                    <MudTextField @bind-Value="_search"
+                                  Placeholder="Search…"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Immediate="true"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Style="max-width: 300px;" />
+                </ToolBarContent>
+                <HeaderContent>
+                    <MudTh>Employee</MudTh>
+                    <MudTh>Department</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>From</MudTh>
+                    <MudTh>To</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh Style="text-align:right">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name">@context.FullName</MudTd>
+                    <MudTd DataLabel="Dept">@context.Department</MudTd>
+                    <MudTd DataLabel="Type">@context.LeaveType</MudTd>
+                    <MudTd DataLabel="From">@context.FromDate</MudTd>
+                    <MudTd DataLabel="To">@context.ToDate</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Size="Size.Small" Color="@LeaveStatusColor(context.Status)" Variant="Variant.Filled">@context.Status</MudChip>
+                    </MudTd>
+                    <MudTd Style="text-align:right">
+                        @if (string.Equals(context.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                                <MudButton Color="Color.Success" OnClick="@(() => Approve(context.LeaveId))">Approve</MudButton>
+                                <MudButton Color="Color.Error" OnClick="@(() => Reject(context.LeaveId))">Reject</MudButton>
+                            </MudButtonGroup>
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager PageSizeOptions="new[] { 10, 25 }" />
+                </PagerContent>
+            </MudTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private string _search = string.Empty;
+
+    private FilterVm _filter = new()
+    {
+        Status = "Pending"
+    };
+
+    private List<AdminLeaveRowVm>? _rows;
+    private string? _errorMessage;
+
+    private bool RowFilter(AdminLeaveRowVm r)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+            return true;
+        var s = _search;
+        return (r.FullName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+               || (r.Department?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+               || (r.LeaveType?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private Color LeaveStatusColor(string status) =>
+        status switch
+        {
+            "Approved" => Color.Success,
+            "Rejected" => Color.Error,
+            _ => Color.Warning
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAuthenticated && string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            await LoadLeaves();
+        }
+    }
+
+    private async Task LoadLeaves()
+    {
+        _errorMessage = null;
+
+        if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var statusParam = string.IsNullOrWhiteSpace(_filter.Status) ? "Pending" : _filter.Status;
+        var url = $"api/leaves/admin?status={Uri.EscapeDataString(statusParam)}";
+        if (!string.IsNullOrWhiteSpace(_filter.Department))
+        {
+            url += $"&department={Uri.EscapeDataString(_filter.Department)}";
+        }
+
+        try
+        {
+            _rows = await Http.GetFromJsonAsync<List<AdminLeaveRowVm>>(url) ?? new List<AdminLeaveRowVm>();
+        }
+        catch
+        {
+            _errorMessage = "Unable to load leaves. Please check your connection or try again.";
+            _rows = new List<AdminLeaveRowVm>();
+        }
+    }
+
+    private async Task Approve(int id)
+    {
+        _errorMessage = null;
+
+        var resp = await Http.PutAsync($"api/leaves/{id}/approve", null);
+        if (resp.IsSuccessStatusCode)
+        {
+            await LoadLeaves();
+            Snackbar.Add("Leave approved.", Severity.Success);
+        }
+        else
+        {
+            var msg = await resp.Content.ReadAsStringAsync();
+            _errorMessage = string.IsNullOrWhiteSpace(msg)
+                ? "Unable to approve leave. Please try again."
+                : msg;
+        }
+    }
+
+    private async Task Reject(int id)
+    {
+        _errorMessage = null;
+
+        var resp = await Http.PutAsync($"api/leaves/{id}/reject", null);
+        if (resp.IsSuccessStatusCode)
+        {
+            await LoadLeaves();
+            Snackbar.Add("Leave rejected.", Severity.Info);
+        }
+        else
+        {
+            var msg = await resp.Content.ReadAsStringAsync();
+            _errorMessage = string.IsNullOrWhiteSpace(msg)
+                ? "Unable to reject leave. Please try again."
+                : msg;
+        }
+    }
+
+    public class FilterVm
+    {
+        public string Status { get; set; } = "Pending";
+        public string? Department { get; set; }
+    }
+
+    public class AdminLeaveRowVm
+    {
+        public int LeaveId { get; set; }
+        public int EmployeeId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public string LeaveType { get; set; } = string.Empty;
+        public DateOnly FromDate { get; set; }
+        public DateOnly ToDate { get; set; }
+        public string Status { get; set; } = string.Empty;
+    }
+}

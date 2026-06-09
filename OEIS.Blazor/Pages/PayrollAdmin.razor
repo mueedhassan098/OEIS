@@ -1,0 +1,161 @@
+@page "/payroll"
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Payroll"
+            Subtitle="Run and finalize monthly payroll. Amounts are in PKR." />
+
+@if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Only admins can view this page.</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-surface mb-4">
+        <MudText Typo="Typo.subtitle1" Class="font-weight-semibold mb-1">Run monthly payroll</MudText>
+        <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.75">
+            Generate salaries for all employees for the selected month. Review the draft before finalizing.
+        </MudText>
+
+        <EditForm Model="_request" OnValidSubmit="RunPayroll">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="3">
+                <MudItem xs="12" sm="4">
+                    <MudTextField @bind-Value="_request.Month"
+                                  Label="Month (YYYY-MM)"
+                                  Variant="Variant.Outlined"
+                                  For="@(() => _request.Month)"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.CalendarMonth" />
+                </MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-end">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               ButtonType="ButtonType.Submit"
+                               StartIcon="@Icons.Material.Filled.PlayArrow"
+                               FullWidth="true"
+                               Class="text-none">
+                        Run payroll
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+            <ValidationSummary />
+        </EditForm>
+    </MudPaper>
+
+    @if (_result is not null)
+    {
+        <MudPaper Elevation="0" Class="pa-5 rounded-xl border-success mud-border-success" Style="border-width: 1px; border-style: solid;">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.subtitle1" Color="Color.Success" Class="font-weight-semibold">Draft results</MudText>
+                <MudText Typo="Typo.body1">
+                    Payroll for <strong>@_result.Month</strong>
+                </MudText>
+                <MudStack Row="true" Spacing="1" Wrap="Wrap.Wrap">
+                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Medium">
+                        @_result.EmployeeCount employees
+                    </MudChip>
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Medium">
+                        Total net @PakistanCurrency.Format(_result.TotalNetAmount)
+                    </MudChip>
+                </MudStack>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.CheckCircle"
+                           Class="mt-2 text-none align-self-start"
+                           OnClick="@(() => _finalizeOpen = true)">
+                    Finalize this payroll
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+}
+
+<MudOverlay Visible="_finalizeOpen" DarkBackground="true" ZIndex="2000" Class="oeis-overlay">
+    <MudPaper Elevation="12" Class="pa-6 ma-4 rounded-xl oeis-animate-in" Style="max-width: 440px; width: 100%;" @onclick:stopPropagation="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Finalize payroll?</MudText>
+        <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.8">
+            Once finalized, salaries for this month will be locked and visible to employees.
+        </MudText>
+        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2">
+            <MudButton Variant="Variant.Text" OnClick="@(() => _finalizeOpen = false)">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Success"
+                       Disabled="_finalizeBusy"
+                       OnClick="FinalizePayrollAsync">
+                @if (_finalizeBusy)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Yes, finalize
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+</MudOverlay>
+
+@code {
+    private PayrollRequestVm _request = new()
+    {
+        Month = DateTime.Today.ToString("yyyy-MM")
+    };
+
+    private PayrollResultVm? _result;
+    private bool _finalizeOpen;
+    private bool _finalizeBusy;
+
+    private async Task RunPayroll()
+    {
+        if (!AuthState.IsAuthenticated || !string.Equals(AuthState.CurrentUser?.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var resp = await Http.PostAsJsonAsync("api/payroll/run", _request);
+        if (resp.IsSuccessStatusCode)
+        {
+            _result = await resp.Content.ReadFromJsonAsync<PayrollResultVm>();
+            Snackbar.Add("Payroll run completed (draft).", Severity.Info);
+        }
+        else
+        {
+            Snackbar.Add("Payroll run failed.", Severity.Error);
+        }
+    }
+
+    private async Task FinalizePayrollAsync()
+    {
+        if (_result is null)
+        {
+            return;
+        }
+
+        _finalizeBusy = true;
+        var resp = await Http.PostAsync($"api/payroll/finalize?month={Uri.EscapeDataString(_result.Month)}", null);
+        _finalizeBusy = false;
+        _finalizeOpen = false;
+
+        if (resp.IsSuccessStatusCode || resp.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
+            Snackbar.Add("Payroll finalized successfully.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Could not finalize payroll.", Severity.Error);
+        }
+    }
+
+    public class PayrollRequestVm
+    {
+        [Required, RegularExpression(@"^\d{4}-(0[1-9]|1[0-2])$", ErrorMessage = "Month must be in format YYYY-MM.")]
+        public string Month { get; set; } = string.Empty;
+    }
+
+    public class PayrollResultVm
+    {
+        public string Month { get; set; } = string.Empty;
+        public int EmployeeCount { get; set; }
+        public decimal TotalNetAmount { get; set; }
+    }
+}

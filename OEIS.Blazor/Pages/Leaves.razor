@@ -1,0 +1,192 @@
+@page "/leaves"
+
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject ISnackbar Snackbar
+
+<PageHeader Title="My leaves"
+            Subtitle="Request time off and track the status of your applications." />
+
+@if (!AuthState.IsAuthenticated)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="rounded-lg">Please sign in to manage leaves.</MudAlert>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)">@_errorMessage</MudAlert>
+    }
+
+    <MudGrid Spacing="4">
+        <MudItem xs="12" lg="5">
+            <MudPaper Elevation="0" Class="pa-5 rounded-xl oeis-surface h-100">
+                <MudText Typo="Typo.overline" Style="opacity:.65">New request</MudText>
+                <MudText Typo="Typo.h6" Class="mb-3">Request leave</MudText>
+                <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.75">Submit type and date range.</MudText>
+
+                <EditForm Model="_newLeave" OnValidSubmit="ApplyLeave">
+                    <DataAnnotationsValidator />
+                    <MudStack Spacing="3">
+                        <MudTextField @bind-Value="_newLeave.LeaveType"
+                                      Label="Leave type"
+                                      Variant="Variant.Outlined"
+                                      For="@(() => _newLeave.LeaveType)"
+                                      Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.EventNote" />
+                        <MudDatePicker @bind-Date="_fromDate" Label="From" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" />
+                        <MudDatePicker @bind-Date="_toDate" Label="To" Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" ButtonType="ButtonType.Submit" FullWidth="true" StartIcon="@Icons.Material.Filled.Send">
+                            Apply
+                        </MudButton>
+                    </MudStack>
+                </EditForm>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" lg="7">
+            <MudPaper Elevation="0" Class="rounded-xl oeis-surface overflow-hidden h-100">
+                <MudToolBar Dense="false" Class="px-4 py-3 border-b mud-border-lines-default">
+                    <MudText Typo="Typo.subtitle1" Class="font-weight-semibold">My requests</MudText>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadLeaves">Refresh</MudButton>
+                </MudToolBar>
+                <div class="pa-2">
+                    @if (_leaves is null)
+                    {
+                        <MudText Class="pa-4" Style="opacity:.65"><em>No data loaded</em></MudText>
+                    }
+                    else if (_leaves.Count == 0)
+                    {
+                        <MudText Class="pa-4" Style="opacity:.65"><em>You have no leave requests yet.</em></MudText>
+                    }
+                    else
+                    {
+                        <MudTable T="LeaveVm" Items="@_leaves" Hover="true" Striped="true" Dense="false" Breakpoint="Breakpoint.Sm" Elevation="0">
+                            <HeaderContent>
+                                <MudTh>Type</MudTh>
+                                <MudTh>From</MudTh>
+                                <MudTh>To</MudTh>
+                                <MudTh>Status</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Type">@context.LeaveType</MudTd>
+                                <MudTd DataLabel="From">@context.FromDate</MudTd>
+                                <MudTd DataLabel="To">@context.ToDate</MudTd>
+                                <MudTd DataLabel="Status">
+                                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)" Variant="Variant.Filled">
+                                        @context.Status
+                                    </MudChip>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private DateTime? _fromDate = DateTime.Today;
+    private DateTime? _toDate = DateTime.Today;
+
+    private LeaveCreateVm _newLeave = new()
+    {
+        FromDate = DateTime.Today,
+        ToDate = DateTime.Today
+    };
+
+    private List<LeaveVm>? _leaves;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAuthenticated)
+        {
+            _fromDate = _newLeave.FromDate;
+            _toDate = _newLeave.ToDate;
+            await LoadLeaves();
+        }
+    }
+
+    private Color StatusColor(string status) =>
+        status switch
+        {
+            "Approved" => Color.Success,
+            "Rejected" => Color.Error,
+            _ => Color.Default
+        };
+
+    private async Task ApplyLeave()
+    {
+        _errorMessage = null;
+
+        if (!AuthState.IsAuthenticated)
+        {
+            return;
+        }
+
+        if (_fromDate.HasValue) _newLeave.FromDate = _fromDate.Value;
+        if (_toDate.HasValue) _newLeave.ToDate = _toDate.Value;
+
+        _newLeave.EmployeeId = AuthState.CurrentUser!.EmployeeId;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/leaves", _newLeave);
+            if (resp.IsSuccessStatusCode)
+            {
+                await LoadLeaves();
+                Snackbar.Add("Leave request submitted.", Severity.Success);
+            }
+            else
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                _errorMessage = string.IsNullOrWhiteSpace(msg)
+                    ? "Unable to submit leave request. Please check your data or remaining leaves."
+                    : msg;
+            }
+        }
+        catch
+        {
+            _errorMessage = "Unable to submit leave request. Please try again.";
+        }
+    }
+
+    private async Task LoadLeaves()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _leaves = new();
+            return;
+        }
+
+        var employeeId = AuthState.CurrentUser!.EmployeeId;
+        _leaves = await Http.GetFromJsonAsync<List<LeaveVm>>($"api/leaves/employee/{employeeId}") ?? new List<LeaveVm>();
+    }
+
+    public class LeaveCreateVm
+    {
+        public int EmployeeId { get; set; }
+
+        [Required, StringLength(50)]
+        public string LeaveType { get; set; } = string.Empty;
+
+        [Required]
+        public DateTime FromDate { get; set; }
+
+        [Required]
+        public DateTime ToDate { get; set; }
+    }
+
+    public class LeaveVm
+    {
+        public int LeaveId { get; set; }
+        public int EmployeeId { get; set; }
+        public string LeaveType { get; set; } = string.Empty;
+        public DateOnly FromDate { get; set; }
+        public DateOnly ToDate { get; set; }
+        public string Status { get; set; } = string.Empty;
+    }
+}

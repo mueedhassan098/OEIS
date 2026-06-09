@@ -1,0 +1,298 @@
+@page "/register"
+
+@using OEIS.Application.DTOs
+@using OEIS.Blazor.Services
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Employee Registration"
+            Subtitle="Apply with your Google (Gmail) email. Your account will be activated after admin approval." />
+
+<MudPaper Elevation="0" Class="pa-6 rounded-xl oeis-surface" Style="max-width: 760px;">
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+        Only Google email addresses are accepted (Gmail or Google Workspace).
+    </MudAlert>
+
+    @if (!string.IsNullOrWhiteSpace(_formError))
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4">@_formError</MudAlert>
+    }
+
+    <EditForm Model="_model" OnValidSubmit="SubmitRegistration">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <MudGrid Spacing="3">
+            <MudItem xs="12">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="flex-wrap">
+                    <MudAvatar Size="Size.Large" Style="width: 96px; height: 96px;">
+                        @if (!string.IsNullOrWhiteSpace(_previewUrl))
+                        {
+                            <MudImage Src="@_previewUrl" Alt="Profile preview" />
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" />
+                        }
+                    </MudAvatar>
+                    <MudStack Spacing="1">
+                        <InputFile id="profile-upload"
+                                   OnChange="OnProfileImageSelected"
+                                   accept="image/jpeg,image/png,image/webp"
+                                   class="d-none" />
+                        <MudButton HtmlTag="label"
+                                   Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Upload"
+                                   for="profile-upload">
+                            Upload profile picture
+                        </MudButton>
+                        <MudText Typo="Typo.caption" Style="opacity:.7">JPG, PNG or WebP · max 2 MB (optional)</MudText>
+                        @if (!string.IsNullOrWhiteSpace(_previewUrl))
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProfileImage">Remove photo</MudButton>
+                        }
+                    </MudStack>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.FullName" Label="Full name" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Email"
+                              Label="Google email"
+                              Variant="Variant.Outlined"
+                              InputType="InputType.Email"
+                              Required="true"
+                              OnBlur="VerifyGoogleEmailAsync"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@GetEmailAdornmentIcon()"
+                              AdornmentColor="@GetEmailAdornmentColor()" />
+                @if (_isVerifyingEmail)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:.7">Checking Google email...</MudText>
+                }
+                else if (!string.IsNullOrWhiteSpace(_emailCheckMessage))
+                {
+                    <MudText Typo="Typo.caption" Color="@(_emailIsGoogle ? Color.Success : Color.Error)">
+                        @_emailCheckMessage
+                    </MudText>
+                }
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Department" Label="Department" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Phone" Label="Phone" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_model.Address" Label="Address" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Password" Label="Password" Variant="Variant.Outlined" InputType="InputType.Password" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.ConfirmPassword" Label="Confirm Password" Variant="Variant.Outlined" InputType="InputType.Password" Required="true" />
+            </MudItem>
+        </MudGrid>
+
+        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-4">
+            <MudButton Variant="Variant.Text" OnClick="@(() => Nav.NavigateTo("/login"))">Back to login</MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       ButtonType="ButtonType.Submit"
+                       Disabled="_submitting || !_emailIsGoogle">
+                @if (_submitting)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                }
+                else
+                {
+                    <span>Submit application</span>
+                }
+            </MudButton>
+        </MudStack>
+    </EditForm>
+</MudPaper>
+
+@code {
+    private RegistrationVm _model = new();
+    private bool _submitting;
+    private bool _isVerifyingEmail;
+    private bool _emailIsGoogle;
+    private string? _emailCheckMessage;
+    private string? _formError;
+    private string? _profileImageBase64;
+    private string? _previewUrl;
+
+    private async Task OnProfileImageSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.Size > 2 * 1024 * 1024)
+        {
+            Snackbar.Add("Profile picture must be 2 MB or smaller.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            _profileImageBase64 = Convert.ToBase64String(bytes);
+            _previewUrl = $"data:{file.ContentType};base64,{_profileImageBase64}";
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not read image: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void ClearProfileImage()
+    {
+        _profileImageBase64 = null;
+        _previewUrl = null;
+    }
+
+    private async Task VerifyGoogleEmailAsync()
+    {
+        _emailCheckMessage = null;
+        _emailIsGoogle = false;
+        _formError = null;
+
+        if (string.IsNullOrWhiteSpace(_model.Email))
+        {
+            return;
+        }
+
+        _isVerifyingEmail = true;
+
+        try
+        {
+            var request = new VerifyGoogleEmailRequestDto(_model.Email.Trim());
+            var resp = await Http.PostAsJsonAsync("api/employees/verify-google-email", request, HttpJson.Options);
+
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<VerifyGoogleEmailResponseDto>(HttpJson.Options);
+                _emailIsGoogle = result?.IsGoogleEmail ?? false;
+                _emailCheckMessage = result?.Message;
+            }
+            else
+            {
+                _emailCheckMessage = await resp.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(_emailCheckMessage))
+                {
+                    _emailCheckMessage = "Could not verify this email.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _emailCheckMessage = $"Could not reach the server. ({ex.Message})";
+        }
+        finally
+        {
+            _isVerifyingEmail = false;
+        }
+    }
+
+    private async Task SubmitRegistration()
+    {
+        _formError = null;
+
+        if (!string.Equals(_model.Password, _model.ConfirmPassword, StringComparison.Ordinal))
+        {
+            Snackbar.Add("Password and confirm password must match.", Severity.Warning);
+            return;
+        }
+
+        if (!_emailIsGoogle)
+        {
+            await VerifyGoogleEmailAsync();
+            if (!_emailIsGoogle)
+            {
+                _formError = _emailCheckMessage ?? "Only Google (Gmail) email addresses can register.";
+                Snackbar.Add(_formError, Severity.Error);
+                return;
+            }
+        }
+
+        _submitting = true;
+
+        try
+        {
+            var payload = new EmployeeRegistrationDto(
+                _model.FullName.Trim(),
+                _model.Email.Trim(),
+                _model.Password,
+                _model.Department.Trim())
+            {
+                Phone = _model.Phone,
+                Address = _model.Address,
+                ProfileImageBase64 = string.IsNullOrWhiteSpace(_profileImageBase64)
+                    ? null
+                    : $"data:image/jpeg;base64,{_profileImageBase64}"
+            };
+
+            var response = await Http.PostAsJsonAsync("api/employees/register", payload, HttpJson.Options);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Registration submitted successfully. Please wait for admin approval.", Severity.Success);
+                Nav.NavigateTo("/login");
+            }
+            else
+            {
+                _formError = await response.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(_formError))
+                {
+                    _formError = "Registration failed.";
+                }
+                Snackbar.Add(_formError, Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _formError = $"Could not reach the server. Make sure the API is running. ({ex.Message})";
+            Snackbar.Add(_formError, Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private string GetEmailAdornmentIcon() =>
+        _emailIsGoogle ? Icons.Material.Filled.CheckCircle :
+        _isVerifyingEmail ? Icons.Material.Filled.HourglassTop :
+        string.IsNullOrWhiteSpace(_emailCheckMessage) ? Icons.Material.Filled.Email :
+        Icons.Material.Filled.Error;
+
+    private Color GetEmailAdornmentColor() =>
+        _emailIsGoogle ? Color.Success :
+        string.IsNullOrWhiteSpace(_emailCheckMessage) ? Color.Default :
+        Color.Error;
+
+    private sealed class RegistrationVm
+    {
+        [Required]
+        public string FullName { get; set; } = string.Empty;
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+        [Required]
+        public string Department { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        [Required, MinLength(6)]
+        public string Password { get; set; } = string.Empty;
+        [Required]
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
+}

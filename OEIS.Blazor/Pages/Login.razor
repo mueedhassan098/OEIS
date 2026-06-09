@@ -1,0 +1,158 @@
+@page "/login"
+
+@using OEIS.Application.DTOs
+@using OEIS.Blazor.Services
+@inject HttpClient Http
+@inject OEIS.Blazor.Services.AuthState AuthState
+@inject OEIS.Blazor.Services.NotificationCenterService NotificationCenter
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center oeis-login-wrap">
+    <MudPaper Elevation="8" Class="pa-8 pa-sm-10 w-100 rounded-xl oeis-login-card oeis-animate-in">
+        <div class="text-center mb-6">
+            <MudText Typo="Typo.h4" Class="font-weight-bold mb-2">Welcome back</MudText>
+            <MudText Typo="Typo.body2" Style="opacity:.75">
+                Sign in with your company email and password.
+            </MudText>
+        </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                    @_error
+                </MudAlert>
+            }
+
+            <EditForm Model="_model" OnValidSubmit="HandleLogin">
+                <DataAnnotationsValidator />
+
+                <MudStack Spacing="2">
+                    <MudTextField @bind-Value="_model.Email"
+                                  Label="Email"
+                                  Variant="Variant.Outlined"
+                                  FullWidth="true"
+                                  Required="true"
+                                  For="@(() => _model.Email)"
+                                  InputType="InputType.Email"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Email"
+                                  Margin="Margin.Dense" />
+
+                    <MudTextField @bind-Value="_model.Password"
+                                  Label="Password"
+                                  Variant="Variant.Outlined"
+                                  FullWidth="true"
+                                  Required="true"
+                                  For="@(() => _model.Password)"
+                                  InputType="InputType.Password"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Lock"
+                                  Margin="Margin.Dense" />
+
+                    <MudStack Row="true" Justify="Justify.FlexEnd">
+                        <MudLink Href="/forgot-password" Typo="Typo.body2">Forgot password?</MudLink>
+                    </MudStack>
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="_isSubmitting"
+                               FullWidth="true"
+                               ButtonType="ButtonType.Submit">
+                        @if (_isSubmitting)
+                        {
+                            <MudProgressCircular Size="Size.Small" Class="me-2" Indeterminate="true" />
+                            <span>Signing in...</span>
+                        }
+                        else
+                        {
+                            <span>Sign in</span>
+                        }
+                    </MudButton>
+                </MudStack>
+            </EditForm>
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.body2" Align="Align.Center">
+                New employee?
+                <MudLink Href="/register" Typo="Typo.body2">Apply here</MudLink>
+            </MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private LoginVm _model = new();
+    private bool _isSubmitting;
+    private string? _error;
+
+    private async Task HandleLogin()
+    {
+        _error = null;
+        _isSubmitting = true;
+
+        try
+        {
+            var request = new LoginRequestDto(_model.Email.Trim(), _model.Password);
+            var resp = await Http.PostAsJsonAsync("api/auth/login", request, HttpJson.Options);
+            if (resp.IsSuccessStatusCode)
+            {
+                var data = await resp.Content.ReadFromJsonAsync<LoginResponseDto>(HttpJson.Options);
+                if (data is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(data.Token))
+                    {
+                        Http.DefaultRequestHeaders.Authorization =
+                            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", data.Token);
+                    }
+
+                    var user = new UserInfo
+                    {
+                        EmployeeId = data.EmployeeId,
+                        FullName = data.FullName,
+                        Email = data.Email,
+                        Role = data.Role
+                    };
+
+                    AuthState.SetUser(user, data.Token);
+
+                    await NotificationCenter.RefreshAsync();
+                    Snackbar.Add($"Welcome back, {data.FullName}.", Severity.Success);
+
+                    if (string.Equals(data.Role, "Admin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Nav.NavigateTo("/employees", forceLoad: false);
+                    }
+                    else
+                    {
+                        Nav.NavigateTo("/attendance", forceLoad: false);
+                    }
+                }
+            }
+            else
+            {
+                var serverMsg = await resp.Content.ReadAsStringAsync();
+                _error = string.IsNullOrWhiteSpace(serverMsg)
+                    ? "Invalid email or password."
+                    : serverMsg;
+                Snackbar.Add(_error, Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not reach the server. ({ex.Message})";
+            Snackbar.Add(_error, Severity.Error);
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    public class LoginVm
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+}
